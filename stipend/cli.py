@@ -737,8 +737,32 @@ def cmd_config_set(args):
     if key == "allowed_destinations":
         return err("Use `stipend config allow-destination 0x...` to manage this list.")
     cfg[key] = value
-    config.save_config(cfg)
+    try:
+        config.save_config(cfg, secret=getattr(args, "secret", None))
+    except config.ConfigLocked as e:
+        return err(e)
     return out({"ok": True, "updated": {key: value}})
+
+
+def cmd_config_lock(args):
+    """Seal the limits behind a secret that does not live on this machine."""
+    try:
+        config.lock_config(args.secret)
+    except config.ConfigLocked as e:
+        return err(e)
+    return out({"ok": True, "locked": True,
+                "protected": list(config.PROTECTED),
+                "note": "Changing any of those now needs --secret. Keep the "
+                        "secret somewhere this machine cannot read, or it "
+                        "protects nothing."})
+
+
+def cmd_config_unlock(args):
+    try:
+        config.unlock_config(args.secret)
+    except config.ConfigLocked as e:
+        return err(e)
+    return out({"ok": True, "locked": False})
 
 
 def cmd_config_allow(args):
@@ -753,7 +777,10 @@ def cmd_config_allow(args):
     elif addr.lower() not in [a.lower() for a in allowed]:
         allowed.append(addr)
     cfg["allowed_destinations"] = allowed
-    config.save_config(cfg)
+    try:
+        config.save_config(cfg, secret=getattr(args, "secret", None))
+    except config.ConfigLocked as e:
+        return err(e)
     return out({"ok": True, "allowed_destinations": allowed,
                 "note": "While this list is non-empty, funds can go nowhere else."})
 
@@ -890,7 +917,12 @@ def build_parser():
     g_p.set_defaults(fn=cmd_config_show)
     g = g_p.add_subparsers(dest="cmd")
     g.add_parser("show").set_defaults(fn=cmd_config_show)
-    st = g.add_parser("set"); st.add_argument("key"); st.add_argument("value"); st.set_defaults(fn=cmd_config_set)
+    st = g.add_parser("set"); st.add_argument("key"); st.add_argument("value")
+    st.add_argument("--secret", help="the lock secret, if the limits are locked")
+    st.set_defaults(fn=cmd_config_set)
+    lk = g.add_parser("lock", help="require a secret to change any limit")
+    lk.add_argument("secret"); lk.set_defaults(fn=cmd_config_lock)
+    ul = g.add_parser("unlock"); ul.add_argument("secret"); ul.set_defaults(fn=cmd_config_unlock)
     al = g.add_parser("allow-destination"); al.add_argument("address"); al.add_argument("--remove", action="store_true"); al.set_defaults(fn=cmd_config_allow)
 
     lg = sub.add_parser("lounge", help="a room on the other side of a full stop")

@@ -47,7 +47,15 @@ So this was built assuming your agent will eventually be fooled, and making
 that not matter:
 
 - **The limits are enforced in the code that signs the transaction**, not in
-  the instructions. No amount of clever text can raise them.
+  the instructions. Nothing your agent reads can change the amount or the payee
+  once it has decided to pay.
+- **The honest edge of that:** the limits live in a config file on your machine,
+  and anything that can write that file can raise them — including your agent,
+  if something talks it into doing so first.
+- **So lock them.** Run `stipend config lock` with a phrase you keep, and no
+  limit can be changed without it. Keep the phrase somewhere the machine cannot
+  read; written next to the config it protects nothing. Stronger still, own the
+  config file yourself and give your agent read-only access.
 - **The approved-destinations list is absolute.** Turn it on, and funds can
   only ever reach addresses you listed — regardless of what your agent is told.
 - **You hold the key, not us.** It's generated on your machine, encrypted with

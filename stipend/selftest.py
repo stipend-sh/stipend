@@ -96,6 +96,41 @@ def run():
     check("known address flows freely", policy.check(0.5, fresh, on)["amount_usdc"], 0.5)
     check("control can be disabled", policy.check(0.5, "0x" + "7" * 40, cfg)["amount_usdc"], 0.5)
 
+    print("\nthe config lock")
+    # The limits are checked in code, which stops a merchant changing an amount.
+    # It does not stop the agent being talked into raising its own ceiling
+    # first -- anything that can write the config can raise a limit. These
+    # check the lock closes that, because it is the difference between a claim
+    # and a control.
+    config.save_config(dict(config.DEFAULT_CONFIG, allowed_destinations=[dest]))
+    config.save_config(dict(config.load_config(), max_per_tx_usdc=500))
+    check("unlocked, the agent can raise its own cap",
+          config.load_config()["max_per_tx_usdc"], 500)
+
+    config.lock_config("a-secret-kept-elsewhere")
+    check("the lock reports itself", config.is_locked(), True)
+    for label, key, value in (("per-transaction cap", "max_per_tx_usdc", 9999),
+                              ("daily cap", "max_per_day_usdc", 9999),
+                              ("new-destination confirm", "confirm_new_destinations", False),
+                              ("the allowlist", "allowed_destinations", [])):
+        raises("locked: %s cannot be changed" % label,
+               (lambda k=key, v=value: config.save_config(
+                   dict(config.load_config(), **{k: v}))),
+               config.ConfigLocked)
+    config.save_config(dict(config.load_config(), chain="base"))
+    check("something that is not a limit still changes",
+          config.load_config()["chain"], "base")
+    raises("the wrong secret is refused",
+           lambda: config.save_config(dict(config.load_config(), max_per_tx_usdc=1),
+                                      secret="wrong"),
+           config.ConfigLocked)
+    config.save_config(dict(config.load_config(), max_per_tx_usdc=30),
+                       secret="a-secret-kept-elsewhere")
+    check("the right secret works", config.load_config()["max_per_tx_usdc"], 30)
+    config.unlock_config("a-secret-kept-elsewhere")
+    check("and it can be unlocked", config.is_locked(), False)
+    config.save_config(dict(config.DEFAULT_CONFIG))
+
     print("\nkeystore (non-custodial)")
     try:
         addr = keystore.create()
