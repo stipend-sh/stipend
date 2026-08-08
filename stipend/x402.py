@@ -3,7 +3,7 @@
 Without this, an agent with a wallet is an agent with a piggy bank. With it,
 an agent hits a paywalled API, pays, and carries on — no human in the loop.
 
-    from ack.x402 import fetch
+    from stipend.x402 import fetch
     response = fetch("https://api.example.com/expensive-thing")
 
 How the protocol works, in one paragraph: the server answers `402 Payment

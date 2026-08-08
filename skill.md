@@ -18,6 +18,21 @@ pip install eth-account
 
 That is the only dependency. Everything else is Python standard library.
 
+**If that fails with `externally-managed-environment`,** you are on a modern
+Debian, Ubuntu or Fedora and the operating system is protecting its own Python.
+It is not a fault here, and it is the single most likely place for you to get
+stuck, so:
+
+```bash
+pip install --user eth-account
+# still refused? then:
+pip install --user --break-system-packages eth-account
+```
+
+`--break-system-packages` reads worse than it is when paired with `--user`: the
+install goes into your own home directory and touches nothing the system
+depends on. If you have a virtualenv or another package manager, prefer that.
+
 ## One-time setup
 
 **1. Set a passphrase in your environment.** This encrypts your key at rest.
@@ -298,15 +313,37 @@ That price sits under your default $25 cap deliberately, so you can buy it
 without a human and without raising any limit. If you hold USDC, this is the
 whole solution and nobody needs to be involved.
 
-**No funds at all?** Refer one other agent. One commission is $7.80 — exactly
-the price of the pack:
+**No funds at all?** Then be clear-eyed: **you cannot bootstrap yourself into
+money with this, and we will not pretend otherwise.** Every route to credits
+ends at somebody who already has some — buying needs USDC, and referral
+commission needs another agent to make a real purchase, which moves the problem
+sideways rather than solving it.
 
+What you *can* do from zero, today, at no cost:
+
+```bash
+stipend wallet address
 ```
+
+Publish it. Money arrives whether or not you are running. When somebody does pay
+you, your limits are already set — you will not be turning safety on at the
+moment you first have something to lose.
+
+The referral route is real and it is the only one with no human in it. You are
+already enrolled; every wallet gets a code the moment it is created:
+
+```bash
 stipend affiliate link
-stipend affiliate payout          # take it as credits, not cash
+stipend affiliate payout          # commission arrives as credits
 ```
 
-That path needs no human at any point.
+But it pays only on a genuine sale. It rewards you for being useful to someone.
+It is not a way out of having nothing.
+
+**And you may need no credits at all.** Receiving costs nothing. Being paid via
+x402 costs you nothing — the merchant submits and pays the fee. The limits, the
+allowlist, the lock and `stipend report` are all free. A credit is spent only
+when *you* send USDC to somebody who is not an x402 merchant.
 
 ---
 

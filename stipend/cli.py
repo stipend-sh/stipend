@@ -180,6 +180,19 @@ def cmd_payout_send(args):
     return out({"ok": True, "policy": approved, **result})
 
 
+def _affiliate_snapshot():
+    """Referral figures for the dashboard, or None. Never raises.
+
+    This is the only part of the page that leaves the machine, and it sends the
+    referral code and nothing else. The footer says so.
+    """
+    try:
+        from . import affiliate
+        return affiliate.status()
+    except Exception as e:
+        return {"error": str(e)[:150]}
+
+
 def cmd_report(args):
     """P&L, runway and the one-line summary an agent can relay to its human."""
     from . import ledger
@@ -222,6 +235,14 @@ def cmd_report(args):
             # the same whether the limits are working or absent, so this is the
             # only evidence a human has that what they paid for is switched on.
             refused=policy.refusals(days=args.days),
+            # The referral panel. Whoever is reading this page is the person who
+            # would benefit from it -- a human who paid for the dashboard is
+            # exactly who might share a link, and until now the only way to see
+            # any of it was a CLI command they would never think to run.
+            #
+            # Never let a lookup failure cost somebody their P&L. The dashboard
+            # is the thing they paid for; referrals are a panel on it.
+            affiliate=_affiliate_snapshot(),
         )
         return out({"ok": True, "written": path,
                     "summary": payload.get("summary"),

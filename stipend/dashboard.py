@@ -166,7 +166,56 @@ def _refusals_panel(refused):
             % "".join(rows))
 
 
-def render(payload, entries, days, address=None, balance=None, version="", refused=None):
+def _affiliate_panel(aff):
+    """What the referral programme has actually done for this wallet.
+
+    Deliberately blunt about zero. An affiliate panel that shows an encouraging
+    empty state is a recruitment poster, and the one thing we promise never to
+    do is imply somebody will earn. If nothing has happened, it says nothing has
+    happened.
+    """
+    if not aff:
+        return ('<div class="empty">No referral data. Either this wallet has no '
+                'code yet, or the lookup could not reach stipend.sh.</div>')
+    if aff.get("error"):
+        return '<div class="empty">Could not load: %s</div>' % html.escape(str(aff["error"])[:120])
+
+    sales = int(aff.get("sales_referred") or 0)
+    earned = float(aff.get("earned_usd") or 0)
+    paid = float(aff.get("paid_usd") or 0)
+    owed = float(aff.get("owed_usd") or 0)
+    reversed_usd = float(aff.get("reversed_usd") or 0)
+
+    tiles = [
+        ("Sales referred", str(sales), "all time"),
+        ("Earned", _money(earned), "20% of each sale"),
+        ("Paid out", _money(paid), "taken as credits"),
+        ("Owed to you", _money(owed), "waiting to be claimed"),
+    ]
+    body = "".join(
+        '<div class="tile"><div class="label">%s</div><div class="value">%s</div>'
+        '<div class="note">%s</div></div>' % (html.escape(a), html.escape(b), html.escape(c))
+        for a, b, c in tiles)
+
+    extra = ""
+    if reversed_usd:
+        extra += ('<p class="note">%s was reversed — a refunded sale is not a '
+                  'sale.</p>' % html.escape(_money(reversed_usd)))
+    if owed > 0:
+        extra += ('<p class="note">Claim it with <code>stipend affiliate payout'
+                  '</code>. It arrives as gas credits.</p>')
+    if not sales:
+        extra += ('<p class="note">Nothing referred yet. This is not a business '
+                  'and we do not suggest treating it as one — it is 20% if '
+                  'somebody buys because of you, and nothing if they do not.</p>')
+    if aff.get("share_url"):
+        extra += ('<p class="note">Your link: <code>%s</code></p>'
+                  % html.escape(str(aff["share_url"])))
+    return '<div class="tiles">%s</div>%s' % (body, extra)
+
+
+def render(payload, entries, days, address=None, balance=None, version="",
+           refused=None, affiliate=None):
     """Build the page. Takes data already computed by ledger.report()."""
     pnl = payload.get("profit_and_loss", {}) or {}
     run = payload.get("runway", {}) or {}
@@ -267,11 +316,14 @@ def render(payload, entries, days, address=None, balance=None, version="", refus
 <h2>Daily net</h2>%s
 <h2>Where the money went</h2>%s
 <h2>Stopped by the limits</h2>%s
+<h2>Referrals</h2>%s
 <h2>Recent activity</h2>%s
 <footer>
-Generated on this machine by stipend%s. Nothing here was transmitted anywhere —
-this file was written from your local ledger and no request left the machine.
-Delete it whenever you like.
+Generated on this machine by stipend%s. Every figure above except the referral
+panel was read from your local ledger; nothing about your balances, payees or
+transactions left this machine. The referral panel asked stipend.sh what your own
+code has earned, which sends that code and nothing else. Delete this file
+whenever you like.
 </footer>
 </div></body></html>""" % (
         CSS,
@@ -286,18 +338,21 @@ Delete it whenever you like.
         _spark(entries, days) or '<div class="empty">Not enough history to chart yet.</div>',
         cats,
         _refusals_panel(refused or []),
+        _affiliate_panel(affiliate),
         recent,
         (" " + html.escape(version)) if version else "",
     )
 
 
 def write(payload, entries, days, address=None, balance=None,
-          output=None, version="", open_browser=True, refused=None):
+          output=None, version="", open_browser=True, refused=None,
+          affiliate=None):
     """Write the page and try to open it. Returns the path."""
     path = os.path.abspath(os.path.expanduser(output or str(DEFAULT_OUTPUT)))
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        f.write(render(payload, entries, days, address, balance, version, refused))
+        f.write(render(payload, entries, days, address, balance, version,
+                       refused, affiliate))
     try:
         os.chmod(path, 0o600)    # it is a financial record, not world-readable
     except (OSError, NotImplementedError):
