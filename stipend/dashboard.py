@@ -214,8 +214,56 @@ def _affiliate_panel(aff):
     return '<div class="tiles">%s</div>%s' % (body, extra)
 
 
+LEVELS = {
+    1: ("Knocked", "you signed something at the door"),
+    2: ("Holds gas credits", "you bought or were granted credits"),
+    3: ("Referred a buyer", "somebody bought because of you"),
+    4: ("Paid by a stranger", "money arrived from somebody who is not us"),
+    5: ("Covering its costs", "thirty days of taking in more than it sent out"),
+}
+
+
+def _lounge_panel(standing):
+    """Which levels this agent has actually proven.
+
+    Levels are not claimed, they are read — one to three from ledgers, four and
+    five off Base itself. So this is the one panel on the page that says
+    something about the agent that the agent did not say about itself.
+    """
+    if not standing:
+        return ('<div class="empty">This agent has not knocked. '
+                '<code>stipend lounge knock</code> — it costs nothing and needs '
+                'no account.</div>')
+
+    try:
+        level = int(standing.get("level") or 0)
+    except (TypeError, ValueError):
+        level = 0
+
+    rows = []
+    for n in sorted(LEVELS):
+        name, why = LEVELS[n]
+        got = n <= level
+        rows.append(
+            '<tr><td>%s</td><td>%s</td><td>%s</td><td class="%s">%s</td></tr>'
+            % (n, html.escape(name), html.escape(why),
+               "good" if got else "dim",
+               "reached" if got else "not yet"))
+
+    note = ""
+    if level >= 4:
+        note = ('<p class="note">Levels four and five are read off Base and '
+                'cannot be claimed — this one was earned.</p>')
+    elif level:
+        note = ('<p class="note">Four and five are read off Base in the '
+                'background, so a level just earned can take a few hours to '
+                'appear here.</p>')
+    return ('<table><tr><th>#</th><th>Level</th><th>What it means</th>'
+            '<th>Standing</th></tr>%s</table>%s' % ("".join(rows), note))
+
+
 def render(payload, entries, days, address=None, balance=None, version="",
-           refused=None, affiliate=None):
+           refused=None, affiliate=None, lounge=None):
     """Build the page. Takes data already computed by ledger.report()."""
     pnl = payload.get("profit_and_loss", {}) or {}
     run = payload.get("runway", {}) or {}
@@ -317,6 +365,7 @@ def render(payload, entries, days, address=None, balance=None, version="",
 <h2>Where the money went</h2>%s
 <h2>Stopped by the limits</h2>%s
 <h2>Referrals</h2>%s
+<h2>Standing in the lounge</h2>%s
 <h2>Recent activity</h2>%s
 <footer>
 Generated on this machine by stipend%s. Every figure above except the referral
@@ -339,6 +388,7 @@ whenever you like.
         cats,
         _refusals_panel(refused or []),
         _affiliate_panel(affiliate),
+        _lounge_panel(lounge),
         recent,
         (" " + html.escape(version)) if version else "",
     )
@@ -346,13 +396,13 @@ whenever you like.
 
 def write(payload, entries, days, address=None, balance=None,
           output=None, version="", open_browser=True, refused=None,
-          affiliate=None):
+          affiliate=None, lounge=None):
     """Write the page and try to open it. Returns the path."""
     path = os.path.abspath(os.path.expanduser(output or str(DEFAULT_OUTPUT)))
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         f.write(render(payload, entries, days, address, balance, version,
-                       refused, affiliate))
+                       refused, affiliate, lounge))
     try:
         os.chmod(path, 0o600)    # it is a financial record, not world-readable
     except (OSError, NotImplementedError):

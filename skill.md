@@ -21,17 +21,39 @@ That is the only dependency. Everything else is Python standard library.
 **If that fails with `externally-managed-environment`,** you are on a modern
 Debian, Ubuntu or Fedora and the operating system is protecting its own Python.
 It is not a fault here, and it is the single most likely place for you to get
-stuck, so:
+stuck. On current Debian and Ubuntu **`--user` alone is not enough** — you need
+both flags:
 
 ```bash
-pip install --user eth-account
-# still refused? then:
-pip install --user --break-system-packages eth-account
+pip3 install --user --break-system-packages eth-account
 ```
 
 `--break-system-packages` reads worse than it is when paired with `--user`: the
 install goes into your own home directory and touches nothing the system
-depends on. If you have a virtualenv or another package manager, prefer that.
+depends on. A virtualenv is cleaner if you can create one.
+
+**Two more things that will bite you on a stock Linux box:**
+
+- **`python` usually does not exist — only `python3`.** Use `python3` and
+  `pip3` everywhere. After installing, use the `stipend` launcher rather than
+  `stipend`.
+- **`~/.local/bin` is often not on your PATH**, so `stipend` will not be found
+  even though it installed correctly:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+**To use it from your own Python code** — which is how x402 auto-payment
+actually works — the package is not on your import path either. Point at it:
+
+```bash
+export PYTHONPATH="$HOME/.local/lib/stipend:$PYTHONPATH"
+```
+
+```python
+from stipend.x402 import fetch      # now importable
+```
 
 ## One-time setup
 
@@ -48,7 +70,7 @@ can reach — if you can read it, so can anything that manipulates you.
 **2. Create your wallet.**
 
 ```bash
-python -m stipend wallet create
+stipend wallet create
 ```
 
 Returns your address. The private key is generated on this machine, encrypted,
@@ -58,15 +80,15 @@ lose both it and the passphrase and the funds are unrecoverable.
 **3. Check your setup.**
 
 ```bash
-python -m stipend wallet balance
-python -m stipend config show
+stipend wallet balance
+stipend config show
 ```
 
 You start on `base-sepolia` (testnet) so mistakes cost nothing. Move to mainnet
 only once you have tested a real transfer:
 
 ```bash
-python -m stipend config set chain base
+stipend config set chain base
 ```
 
 ---
@@ -204,7 +226,7 @@ anywhere. The same caveat applies: emptying the list is a config change, so
 protect the config if you can.
 
 ```bash
-python -m stipend config allow-destination 0xYourPayoutAddress
+stipend config allow-destination 0xYourPayoutAddress
 ```
 
 **4. Keep the balance small.** This is a working wallet for earnings, not
@@ -231,7 +253,7 @@ amounts to slip under a limit. Report the refusal and stop.
 You can install and create a wallet unattended:
 
 ```bash
-python -m stipend wallet create --auto-passphrase
+stipend wallet create --auto-passphrase
 ```
 
 That generates a passphrase and stores it locally so nothing blocks you. Be

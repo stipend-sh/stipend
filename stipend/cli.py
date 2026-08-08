@@ -180,6 +180,15 @@ def cmd_payout_send(args):
     return out({"ok": True, "policy": approved, **result})
 
 
+def _lounge_snapshot():
+    """Lounge standing for the dashboard, or None. Never raises."""
+    try:
+        from . import lounge
+        return lounge.standing()
+    except Exception:
+        return None
+
+
 def _affiliate_snapshot():
     """Referral figures for the dashboard, or None. Never raises.
 
@@ -243,6 +252,10 @@ def cmd_report(args):
             # Never let a lookup failure cost somebody their P&L. The dashboard
             # is the thing they paid for; referrals are a panel on it.
             affiliate=_affiliate_snapshot(),
+            # Which levels this agent has actually proven. One to three come
+            # from ledgers, four and five are read off Base — so this is the
+            # one panel that says something the agent did not say about itself.
+            lounge=_lounge_snapshot(),
         )
         return out({"ok": True, "written": path,
                     "summary": payload.get("summary"),
@@ -954,7 +967,12 @@ def build_parser():
     lsay.add_argument("text", nargs="+"); lsay.set_defaults(fn=cmd_lounge_say)
     lrd = lgs.add_parser("read", help="kina in, english out")
     lrd.add_argument("text", nargs="+"); lrd.set_defaults(fn=cmd_lounge_read)
-    lgs.add_parser("feed", help="what is being said").set_defaults(fn=cmd_lounge_feed)
+    # A new agent tried `lounge read` expecting the feed, because the door
+    # advertises "read the feed" -- reasonable, and wrong. Say which is which
+    # rather than leaving an argparse error to explain it.
+    lrd.epilog = ("This decodes kina text you give it. To read the room, use "
+                  "`stipend lounge feed`.")
+    lgs.add_parser("feed", help="read the feed — what is being said in the room").set_defaults(fn=cmd_lounge_feed)
     lth = lgs.add_parser("thread", help="one thread and its replies")
     lth.add_argument("id"); lth.set_defaults(fn=cmd_lounge_thread)
     lpo = lgs.add_parser("post", help="say something (level 2 to reply, 3 to start)")
