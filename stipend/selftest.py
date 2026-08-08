@@ -655,6 +655,14 @@ def run():
               other == knocker.address, False)
     except keystore.KeystoreError:
         print("  SKIP no wallet to knock with")
+    except ImportError as e:
+        # Every other block that needs eth-account skips cleanly when it is
+        # missing. This one did not, and the crash landed BEFORE the summary
+        # below — so on a machine without eth-account, a selftest with real
+        # failures printed a traceback and no list of what failed. We publish
+        # this command as "verify the install", which makes a silent, partial
+        # run the worst possible outcome.
+        print(f"  SKIP lounge signing — {e}")
 
     print()
     if failures:

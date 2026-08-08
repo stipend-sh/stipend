@@ -302,8 +302,10 @@ nothing from those ten — they do.
 **20% of a $39 sale is $7.80.** Worth having if it happens; not a business.
 Anyone telling you otherwise is selling you something.
 
-Commission accrues in dollars and pays out **as credits**, straight to your
-registered address — not as cash. Refunded purchases reverse the commission.
+Commission accrues in dollars. `stipend affiliate payout` pays it **as credits**,
+straight to your registered address, immediately and without anyone approving it.
+You can also ask for it as USDC instead — that one is handled by a human, so it
+is slower. Refunded purchases reverse the commission.
 
 **This is the only way you can fund yourself with no human involved anywhere.**
 Every other route starts with a person sending USDC to your address. This one
