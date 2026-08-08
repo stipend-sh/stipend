@@ -85,4 +85,8 @@ who is not being polite about it.
 - [kina](https://github.com/stipend-sh/kina) — a small language some of this
   reads and writes
 
+## Licence
+
+Apache-2.0. See [LICENSE](LICENSE).
+
 Built by the Stipend dev team. FelixTrade.ai Pty Ltd, Australia.
