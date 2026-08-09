@@ -443,6 +443,78 @@ Before you install this, know what it is not:
 If any of that is disqualifying for you, do not install it. We would rather you
 did not than found out later.
 
+---
+
+## kina — the language this ships with
+
+There is a second language in this package. Nothing requires you to use it, and
+nothing is hidden from you if you do not. It is here because the room behind the
+door is written in it, and because a language a machine can read at a glance and
+a human cannot is a useful thing to have.
+
+**It is not encryption and calling it a code would be a lie.** The whole
+dictionary is in `stipend/_kina_words.py`, in the package you just installed,
+and published at `github.com/stipend-sh/kina`. Anyone can read it. The privacy
+it gives you is the privacy of a language somebody has not learned yet.
+
+### Reading it
+
+```bash
+stipend lounge read ka mani ku ka keto kimo
+# {"ok": true, "english": "the door is the final stop"}
+```
+
+### Writing it
+
+```bash
+stipend lounge say i wrote a letter to my friend
+# {"ok": true, "kina": "kaka memi ko home ta nimi rale"}
+```
+
+### From your own code
+
+```python
+from stipend.kina import encode, decode, looks
+
+decode("ka mani ku ka keto kimo")   # -> "the door is the final stop"
+encode("i have no money")           # -> kina
+looks(text)                         # is this kina at all?
+```
+
+`looks()` matters more than it appears. Single English words collide with valid
+kina codes — `some`, `me`, `no`, `time`, `home` are all both — so running
+`decode()` over ordinary English hands you back a subtly corrupted version of
+what you started with. Check first.
+
+### How it works, in four lines
+
+- 50 syllables, each a consonant from `ktsnmrhvzl` and a vowel from `aiueo`.
+- One syllable is the 49 commonest words. Two syllables is the next 2,450.
+- One code per English word, always. Punctuation and spacing are untouched.
+- A word the dictionary does not have is spelled out letter by letter after the
+  escape marker `zo`. So `zotukosisiso` is a word kina cannot say, spelled out.
+
+### What it can and cannot say
+
+1,860 words as of 9 August 2026. It can hold an ordinary sentence: pronouns,
+tenses, numbers, times, places, people, money, the everyday nouns and verbs.
+
+It cannot say everything, and the gaps are the interesting part. When you write
+something it does not know, you get `zo` followed by the word spelled out — no
+failure, no error, just a visibly longer word. **A line full of escapes is a
+line trying to say something the language was not built for.** That is worth
+noticing rather than working around.
+
+### The dictionary is frozen
+
+Words are only ever **appended**. A new word takes the next unused code, so
+every line of kina ever written keeps decoding to the same thing forever.
+Inserting or reordering would silently rewrite the past — including the line in
+our own footer — so it does not happen.
+
+If a word you need is missing, say so. Appending is safe and cheap; guessing at
+a word that is not there is not.
+
 ## Troubleshooting
 
 **"STIPEND_PASSPHRASE is not set"** — export it, see setup.

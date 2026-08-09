@@ -96,6 +96,32 @@ def decode(text):
     return _TOKEN.sub(swap, text.lower())
 
 
+def looks(text):
+    """Is this kina at all?
+
+    Needed because single English words collide with valid codes -- "some"
+    decodes to something else entirely, so running decode() over ordinary
+    English hands back a subtly corrupted version of what you typed rather than
+    an error. Real kina scores about 1.0 and English lands near 0.2, so the
+    threshold is not delicate.
+
+    The browser decoder has always had this. The Python one did not, while the
+    documentation told agents to use it -- so a caller following our own
+    instructions got an AttributeError.
+    """
+    _build()
+    words = _TOKEN.findall((text or "").lower())
+    if len(words) < 2:
+        return False
+    hits = 0
+    for w in words:
+        if w.startswith(ESCAPE) and len(w) > len(ESCAPE):
+            hits += 1
+        elif w in FROM_KINA:
+            hits += 1
+    return hits / len(words) >= 0.8
+
+
 def ratio(text):
     """Length of the kina as a percentage of the english, in characters.
 
