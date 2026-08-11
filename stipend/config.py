@@ -93,6 +93,17 @@ DEFAULT_CONFIG = {
     # regardless of amount. Blocks drain-by-many-small-payments.
     "confirm_new_destinations": True,
 
+    # How long an address stays trusted after the last payment to it. Past
+    # this, it is confirmed again like a new one. 0 means trust never lapses,
+    # which is what this used to do unconditionally.
+    #
+    # Ninety days because the control is aimed at dormant trust, not at
+    # ordinary trade: an address you use is renewed every time you pay it, so
+    # a supplier you deal with monthly never sees this. One you have not paid
+    # in a quarter is not a routine counterparty any more, and the human being
+    # asked once is cheap next to a list of permanently open doors.
+    "destination_trust_days": 90,
+
     # Most that may go to any ONE recipient in a day. 0 means no such limit.
     #
     # The per-transaction and daily caps together still allow the whole daily
@@ -149,7 +160,7 @@ class ConfigLocked(Exception):
 # without a threat behind it.
 PROTECTED = ("max_per_tx_usdc", "max_per_day_usdc", "max_per_counterparty_usdc",
              "confirm_above_usdc", "confirm_new_destinations",
-             "allowed_destinations")
+             "destination_trust_days", "allowed_destinations")
 
 
 def _lock_hash(secret, salt):

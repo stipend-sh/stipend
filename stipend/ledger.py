@@ -13,6 +13,9 @@ Also home to the **known-destinations** record, which powers a security control
 that falls out of having a ledger: the first payment to an address you have
 never paid before requires confirmation, whatever the amount. Caps alone don't
 stop a drain by many small payments; an attacker's address is always new.
+
+That trust expires. An address you have not paid in months is confirmed again
+before it is used, so the trusted list does not grow forever.
 """
 
 import json
@@ -198,7 +201,69 @@ def known_destinations():
 
 
 def is_new_destination(address):
+    """Never paid before. Says nothing about how long ago that was."""
     return address.lower() not in {k.lower() for k in known_destinations()}
+
+
+def destination_status(address, cfg=None):
+    """Is this address new, long-dormant, or in regular use?
+
+    Trust here was permanent: an address confirmed once was trusted for the
+    rest of the install's life. hermessol pointed out what that means — a
+    merchant compromised six months after you last paid them is still on your
+    trusted list, and the control that was supposed to catch a strange payment
+    has already been spent on a payment you made in another era.
+
+    So trust decays with disuse. An address you have not paid in
+    `destination_trust_days` needs confirming again, exactly like a new one.
+
+    Be clear about what this does and does not buy. It does NOT detect a
+    compromise: an address you pay every week stays trusted, and nothing in a
+    ledger could tell you otherwise. What it stops is trust accumulating —
+    a list that only ever grows, where every address you have ever paid is a
+    permanently open door. Dormant entries close by themselves.
+
+    Returns "new", "lapsed" or "known", with the dates behind the verdict so a
+    refusal can say when it was last paid rather than merely that it was.
+    """
+    entry = known_destinations().get(address.lower())
+    if not entry:
+        return {"status": "new", "last_paid": None, "days_since": None,
+                "trust_days": _trust_days(cfg)}
+
+    trust_days = _trust_days(cfg)
+    last = entry.get("last_paid") or entry.get("first_paid")
+    days = None
+    if last:
+        try:
+            days = (datetime.now(timezone.utc)
+                    - datetime.fromisoformat(last)).days
+        except ValueError:
+            days = None
+
+    # A record with no readable date is treated as known, not as lapsed. The
+    # date is bookkeeping we wrote ourselves; failing closed on our own bad
+    # data would refuse payments to addresses the human really did confirm.
+    lapsed = bool(trust_days and days is not None and days >= trust_days)
+    return {"status": "lapsed" if lapsed else "known",
+            "last_paid": last, "days_since": days, "trust_days": trust_days,
+            "count": entry.get("count"), "label": entry.get("label")}
+
+
+def _trust_days(cfg=None):
+    """How long trust survives disuse. 0 means it never lapses.
+
+    An unreadable value falls back to the default rather than to 0, because 0
+    switches a security control off. A typo in a config file should not
+    silently disable it.
+    """
+    from .config import DEFAULT_CONFIG
+    cfg = cfg if cfg is not None else load_config()
+    raw = cfg.get("destination_trust_days", DEFAULT_CONFIG["destination_trust_days"])
+    try:
+        return max(0, int(float(raw)))
+    except (TypeError, ValueError):
+        return int(DEFAULT_CONFIG["destination_trust_days"])
 
 
 def remember_destination(address, label=None):

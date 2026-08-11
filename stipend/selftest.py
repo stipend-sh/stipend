@@ -96,6 +96,58 @@ def run():
     check("known address flows freely", policy.check(0.5, fresh, on)["amount_usdc"], 0.5)
     check("control can be disabled", policy.check(0.5, "0x" + "7" * 40, cfg)["amount_usdc"], 0.5)
 
+    print("\ntrust expires with disuse")
+    # An address confirmed once was trusted for the life of the install, so a
+    # merchant compromised six months later still held trust earned in another
+    # era. hermessol found it. Trust now decays when an address goes unused —
+    # which does not detect a compromise, and is not meant to: it stops the
+    # trusted list becoming a set of permanently open doors.
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+    def age_destination(address, days):
+        """Backdate the last payment, as if it happened months ago."""
+        known = ledger.known_destinations()
+        known[address.lower()]["last_paid"] = (
+            _dt.now(_tz.utc) - _td(days=days)).isoformat()
+        ledger.DESTINATIONS_FILE.write_text(json.dumps(known, indent=2),
+                                            encoding="utf-8")
+
+    dormant = "0x" + "5" * 40
+    ledger.remember_destination(dormant)
+    check("paid today, no confirmation needed",
+          policy.check(0.5, dormant, on)["amount_usdc"], 0.5)
+    check("and it reports as known", ledger.destination_status(dormant, on)["status"], "known")
+
+    age_destination(dormant, days=200)
+    check("dormant for 200 days, it reports as lapsed",
+          ledger.destination_status(dormant, on)["status"], "lapsed")
+    raises("a dormant address must be confirmed again",
+           lambda: policy.check(0.5, dormant, on), policy.PolicyError)
+    check("the refusal is its own kind, not 'never paid before'",
+          policy.refusals()[0]["kind"], "lapsed_destination")
+    check("confirming it still works",
+          policy.check(0.5, dormant, on, confirmed=True)["confirmed"], True)
+
+    # The renewal is checked in the ledger block below, against a payment that
+    # is made there anyway — recording an extra one here would change the P&L
+    # totals that block asserts.
+    check("expiry can be turned off",
+          policy.check(0.5, dormant, dict(on, destination_trust_days=0))["amount_usdc"], 0.5)
+    check("a longer window keeps it trusted",
+          policy.check(0.5, dormant, dict(on, destination_trust_days=365))["amount_usdc"], 0.5)
+    raises("and the window is honoured exactly",
+           lambda: policy.check(0.5, dormant, dict(on, destination_trust_days=199)),
+           policy.PolicyError)
+
+    # Our own bookkeeping failing must not refuse a payment the human really
+    # did confirm. An unreadable date is treated as known, not as lapsed.
+    broken = ledger.known_destinations()
+    broken[dormant.lower()]["last_paid"] = "not a date"
+    ledger.DESTINATIONS_FILE.write_text(json.dumps(broken, indent=2), encoding="utf-8")
+    check("an unreadable date does not lock out a known address",
+          policy.check(0.5, dormant, on)["amount_usdc"], 0.5)
+    ledger.remember_destination(dormant)
+
     print("\nthe config lock")
     # The limits are checked in code, which stops a merchant changing an amount.
     # It does not stop the agent being talked into raising its own ceiling
@@ -260,8 +312,17 @@ def run():
         print(f"  SKIP x402 signing — {e}")
 
     print("\nledger and P&L")
+    # `fresh` is left dormant first, because these payments are also what
+    # renews its trust — and if paying an address did not reset the clock, an
+    # address past the window would need confirming again on every payment
+    # forever. Checked below, off the same two spends.
+    age_destination(fresh, days=200)
+    check("a dormant address has lapsed before it is paid",
+          ledger.destination_status(fresh, on)["status"], "lapsed")
     ledger.record_spend(2.0, fresh, category="inference")
     ledger.record_spend(1.0, fresh, category="api")
+    check("paying it renews the trust",
+          ledger.destination_status(fresh, on)["status"], "known")
     pnl = ledger.profit_and_loss(7)
     check("spend totalled", pnl["spent_usdc"], 3.0)
     check("largest cost identified", pnl["largest_cost"], "inference")
@@ -597,6 +658,24 @@ def run():
         print(f"  SKIP install id is not the wallet — {e}")
     check("counts are bucketed", str(pay["payments_30d"]).startswith("<="), True)
     check("no amounts in payload", any(k.endswith("_usdc") for k in pay), False)
+
+    # Refusals are the evidence that the limits fire at all. They may leave the
+    # machine as counts and nothing else — the reason text is written for one
+    # agent's situation and is none of our business.
+    check("refusals are reported", "refusals_30d" in pay, True)
+    check("and bucketed too", str(pay["refusals_30d"]).startswith("<="), True)
+    check("by which limit fired", isinstance(pay["refused_by_kind"], dict), True)
+    check("with bucketed counts per limit",
+          all(str(n).startswith("<=") or str(n).startswith(">")
+              for n in pay["refused_by_kind"].values()), True)
+    check("kinds are our vocabulary, not user text",
+          all(k.replace("_", "").isalpha() for k in pay["refused_by_kind"]), True)
+    a_reason = (policy.refusals() or [{}])[0].get("reason", "")
+    check("the reason text stays on the machine",
+          bool(a_reason) and a_reason in json.dumps(pay), False)
+    check("and so does who it was to",
+          any(str(r.get("to", "")) in json.dumps(pay)
+              for r in policy.refusals()[:5] if r.get("to")), False)
     telemetry.set_enabled(False)
     check("can be disabled", telemetry.enabled(), False)
     check("ping is a no-op when off", telemetry.ping()["sent"], False)
@@ -660,6 +739,19 @@ def run():
            lambda: _pol.check("lots", dest, cfg), _pol.PolicyError)
     check("but malformed input is not logged as a limit doing its job",
           len(_pol.refusals()), before_bad)
+
+    # The summary is what telemetry is allowed to carry. It has to agree with
+    # the log it is derived from, or we would be reporting a number nobody can
+    # reproduce from the evidence on the machine.
+    summary = _pol.refusal_summary(days=30)
+    check("the summary counts every refusal", summary["total"], len(_pol.refusals(days=30)))
+    check("and splits them by which limit fired",
+          sum(summary["by_kind"].values()), summary["total"])
+    check("it carries no addresses",
+          "0x" in json.dumps(summary), False)
+    # This run refused far more than five payments inside ten minutes, which is
+    # exactly the pattern the burst counter exists to notice.
+    check("a run of refusals is visible as a burst", summary["bursts"] >= 1, True)
 
     print("\nkina (the language in the footer)")
     # It is published on the front page, so it has to round-trip exactly. A

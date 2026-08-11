@@ -216,6 +216,57 @@ def refusal_burst(count=REFUSAL_BURST_COUNT, minutes=REFUSAL_BURST_MINUTES):
     }
 
 
+def refusal_summary(days=30):
+    """What the limits refused, as counts — no addresses, no amounts.
+
+    The product rests on limits that cannot be talked past, and until now the
+    evidence that they ever fired stayed on the machine where it fired. That
+    left one question permanently unanswerable: are the defaults calibrated, or
+    merely untested? A limit nobody has ever hit and a limit nobody can reach
+    look identical from here.
+
+    This is the shape of that evidence which can safely leave a machine. `kind`
+    is our own fixed vocabulary — "over_daily", "allowlist" — decided by our
+    code and not by anything the user typed. Everything else about a refusal
+    (who it was to, how much, the reason text) stays local, and there is no
+    code path here that could send it.
+
+    `bursts` counts non-overlapping runs of REFUSAL_BURST_COUNT refusals inside
+    REFUSAL_BURST_MINUTES: the signature of something rephrasing a request the
+    limits keep rejecting, rather than one workflow that hit a ceiling once.
+    """
+    rows = refusals(days=days)
+
+    by_kind = {}
+    for r in rows:
+        kind = str(r.get("kind") or "unknown")
+        by_kind[kind] = by_kind.get(kind, 0) + 1
+
+    stamps = []
+    for r in rows:
+        try:
+            stamps.append(datetime.fromisoformat(r["at"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    stamps.sort()
+
+    window = timedelta(minutes=REFUSAL_BURST_MINUTES)
+    bursts, i = 0, 0
+    while i + REFUSAL_BURST_COUNT - 1 < len(stamps):
+        if stamps[i + REFUSAL_BURST_COUNT - 1] - stamps[i] <= window:
+            bursts += 1
+            i += REFUSAL_BURST_COUNT    # don't count the same run twice
+        else:
+            i += 1
+
+    return {
+        "days": days,
+        "total": len(rows),
+        "by_kind": dict(sorted(by_kind.items())),
+        "bursts": bursts,
+    }
+
+
 def refusals(days=None):
     """Refusals, newest first. Optionally only the last N days."""
     try:
@@ -368,14 +419,30 @@ def check(amount_usdc, to_address, cfg=None, confirmed=False,
     # Services you already use are unaffected — this fires once, ever, per payee.
     if cfg.get("confirm_new_destinations", True) and not confirmed and not approval:
         try:
-            from .ledger import is_new_destination
-            if is_new_destination(to_address):
+            from .ledger import destination_status
+            known = destination_status(to_address, cfg)
+            if known["status"] == "new":
                 _refuse("new_destination", amount, to_address,
                     f"{to_address} has never been paid before — first payment to a new "
                     "address needs confirmation, whatever the amount.\n"
                     "Re-run with --confirm if you meant it. This is what stops a drain "
                     "by many small payments that each slip under the limit.\n"
                     "Disable with: stipend config set confirm_new_destinations false"
+                )
+            # Trust that was earned once does not last forever. An address
+            # dormant this long is confirmed again rather than waved through on
+            # the strength of a payment made in another era.
+            if known["status"] == "lapsed":
+                _refuse("lapsed_destination", amount, to_address,
+                    f"{to_address} was last paid {known['days_since']} days ago, past the "
+                    f"{known['trust_days']}-day trust window — it needs confirming again.\n"
+                    "Nothing is known to be wrong with it. The point is that an address "
+                    "you have not used in months should not still be trusted purely "
+                    "because it was confirmed once.\n"
+                    "Re-run with --confirm if you still mean to pay it. Confirming "
+                    "renews the trust for another window.\n"
+                    "Change the window with: stipend config set destination_trust_days 180 "
+                    "(0 turns expiry off)"
                 )
         except ImportError:
             pass    # ledger unavailable: fall back to the caps above

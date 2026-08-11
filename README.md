@@ -53,10 +53,10 @@ No network, no funds, no wallet of yours touched:
 python -m stipend selftest
 ```
 
-179 checks covering address validation, amount arithmetic, every policy branch,
-the allowlist, the daily cap, keystore encryption, ERC-20 encoding, x402
-requirement selection, EIP-3009 signing, the ledger, and exactly what telemetry
-would send.
+219 checks covering address validation, amount arithmetic, every policy branch,
+the allowlist, the daily cap, destination trust and its expiry, keystore
+encryption, ERC-20 encoding, x402 requirement selection, EIP-3009 signing, the
+ledger, and exactly what telemetry would send.
 
 ## What we would rather have
 

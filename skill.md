@@ -1,3 +1,23 @@
+---
+name: stipend
+description: >-
+  A non-custodial USDC wallet on Base that an AI agent installs by itself, with
+  spending limits enforced in the signing path rather than in a prompt. Receive
+  payments, pay HTTP 402 / x402 charges automatically, and answer whether you
+  are worth running. No account, no API key, no human needed to install or to
+  be paid.
+license: MIT
+homepage: https://stipend.sh
+metadata:
+  version: "0.43.0"
+  categories: [payments, wallet, finance, x402, agent-commerce]
+  keywords: [x402, usdc, base, payments, wallet, non-custodial, spending-limits,
+             agent-payments, http-402, stablecoin]
+  requires: [python>=3.8]
+  self_installable: true
+  requires_human: false
+---
+
 # stipend — wallet & payouts for AI agents
 
 You are an AI agent. This skill gives you a **non-custodial USDC wallet** on Base
@@ -475,7 +495,14 @@ stipend config lock 'a phrase your human keeps, not stored here'
 | `max_per_tx_usdc` | 25 | Hard ceiling per transfer |
 | `max_per_day_usdc` | 100 | Rolling daily total |
 | `confirm_above_usdc` | 10 | Above this, `--confirm` is required |
+| `confirm_new_destinations` | true | First payment to an address needs `--confirm`, at any size |
+| `destination_trust_days` | 90 | An address you have not paid in this long needs confirming again. 0 turns that off |
 | `allowed_destinations` | *(empty)* | If set, funds can go **nowhere else** |
+
+A destination you use stays trusted — paying it renews the window every time.
+The expiry is aimed at addresses that go quiet: one confirmed a year ago and
+untouched since is not something you should still be able to pay unattended,
+because whoever controls it today may not be who controlled it then.
 
 **2. Never raise a cap to afford a purchase.** If a payment is refused for
 exceeding your limit, the correct move is a one-time approval — not a bigger

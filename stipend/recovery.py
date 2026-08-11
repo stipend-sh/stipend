@@ -76,6 +76,12 @@ _OWNERS = {
         "First payment to an address needs a human to confirm it once. After "
         "that the address is known and payments flow normally.",
         False),
+    "lapsed_destination": (
+        HUMAN,
+        "This address has not been paid in months, so its confirmation has "
+        "expired and a human has to renew it. Nothing is known to be wrong "
+        "with the address; trust simply does not last forever unused.",
+        False),
     # not policy refusals, but the same question is asked of them
     "unresolved_payment": (
         RECONCILE,

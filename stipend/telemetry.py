@@ -9,11 +9,14 @@ What is sent:
   * the version, the chain name (base / base-sepolia)
   * counts: how many payments, how many x402 calls
   * coarse spend buckets, NOT amounts
+  * how often the limits refused a payment, and which limit — as buckets, from
+    our own fixed list of reasons
 
 What is never sent — and there is no code path that could:
   * wallet addresses, private keys, the passphrase
   * counterparties, URLs, transaction hashes
   * exact amounts, balances, or anything joinable back to a person
+  * the reason text of a refusal, or who it was to
 
 Disclosed on first run, one line to turn off, and the payload is printable
 before it is sent (`stipend telemetry show`). If you would not be comfortable
@@ -36,8 +39,9 @@ SEND_EVERY = 24 * 3600
 
 NOTICE = """
 Stipend counts anonymous installs so we know how many agents are using it.
-Sent: a random id, the version, the chain name, and how many payments were
-made. Never sent: addresses, keys, amounts, counterparties or URLs.
+Sent: a random id, the version, the chain name, how many payments were made,
+and how many the limits refused. Never sent: addresses, keys, amounts,
+counterparties or URLs.
 
   See exactly what would be sent:  stipend telemetry show
   Turn it off:                     stipend telemetry off
@@ -137,7 +141,40 @@ def payload():
         # stats page was permanently zero. The licence file is the only thing
         # that actually knows.
         "tier": _tier(),
+        **_refusals(),
     }
+
+
+def _refusals():
+    """How often the limits refused something, by kind. Counts only.
+
+    The limits are the product. Whether they are set anywhere near right is a
+    question we could not answer at all: a refusal was written to a file on the
+    agent's own machine and stayed there, so "the defaults are well judged" and
+    "nobody has ever reached the defaults" produced identical evidence — none.
+
+    Same bar as everything else here. The kind is a word our own code chose
+    from a fixed list; the count is a bucket. Who was being paid, how much, and
+    the reason text never leave, and no code path here could carry them.
+
+    Never raises: telemetry is the least important thing on this machine.
+    """
+    try:
+        from . import policy
+        summary = policy.refusal_summary(days=30)
+        return {
+            "refusals_30d": _bucket(summary["total"]),
+            # Which limits are doing the work. A build where only
+            # new_destination ever fires is telling us something different from
+            # one where over_daily fires constantly.
+            "refused_by_kind": {k: _bucket(n)
+                                for k, n in summary["by_kind"].items()},
+            # Runs of refusals in minutes — someone rephrasing until something
+            # gets through, which is the case the limits exist for.
+            "refusal_bursts_30d": _bucket(summary["bursts"]),
+        }
+    except Exception:
+        return {}
 
 
 RELEASE_URL = os.environ.get("STIPEND_RELEASE_URL", "https://stipend.sh/api/release")

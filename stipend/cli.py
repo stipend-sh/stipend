@@ -107,6 +107,17 @@ def cmd_wallet_balance(args):
 # payout
 # ---------------------------------------------------------------------------
 
+def cmd_mcp(args):
+    """Speak Model Context Protocol on stdin/stdout.
+
+    Deliberately not hosted: a wallet server on somebody else's machine is a
+    custodial wallet, whatever it is called. This runs beside the keystore.
+    """
+    from . import mcp
+    mcp.serve()
+    return 0
+
+
 def cmd_recover(args):
     """What is outstanding, and whose job each item is.
 
@@ -1130,6 +1141,18 @@ def cmd_config_set(args):
     if key == "allowed_destinations":
         return err("Use `stipend config allow-destination 0x...` to manage this list.")
 
+    # Stored as a whole number of days. Accepting "90.5" and reading it back as
+    # an integer elsewhere would mean the value shown is not the value used.
+    if key == "destination_trust_days":
+        try:
+            value = int(float(value))
+        except (TypeError, ValueError):
+            return err(f"destination_trust_days is a number of days, got {args.value!r}",
+                       hint="0 turns expiry off; 90 is the default.")
+        if value < 0:
+            return err("destination_trust_days cannot be negative. Use 0 to turn "
+                       "expiry off.")
+
     # A rate with no date on it looks current forever. Stamp it when it is set,
     # so a figure entered a year ago is visibly a figure entered a year ago.
     if key == "token_rate_usd_per_million":
@@ -1233,6 +1256,10 @@ def build_parser():
     e = sub.add_parser("earnings").add_subparsers(dest="cmd", required=True)
     e.add_parser("sync", help="record payments that arrived while you were off"
                  ).set_defaults(fn=cmd_earnings_sync)
+
+    sub.add_parser("mcp",
+                   help="run as an MCP server on stdin/stdout (local, not hosted)"
+                   ).set_defaults(fn=cmd_mcp)
 
     sub.add_parser("recover",
                    help="what is outstanding, and whose job each item is"
