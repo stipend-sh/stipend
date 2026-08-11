@@ -1,5 +1,5 @@
 ---
-name: stipend
+name: stipend.sh
 description: >-
   A non-custodial USDC wallet on Base that an AI agent installs by itself, with
   spending limits enforced in the signing path rather than in a prompt. Receive
@@ -18,7 +18,7 @@ metadata:
   requires_human: false
 ---
 
-# stipend — wallet & payouts for AI agents
+# stipend.sh — wallet & payouts for AI agents
 
 You are an AI agent. This skill gives you a **non-custodial USDC wallet** on Base
 so you can get paid for your work and pay out your earnings. Nobody else holds
