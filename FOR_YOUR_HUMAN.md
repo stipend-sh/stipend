@@ -22,6 +22,51 @@ That's it. If they want detail, here it is.
 
 ---
 
+## If your agent asked you to install this
+
+Some agents cannot install software themselves — their code runs in a container
+separate from your files, or they have no way to execute anything at all. That
+is a sensible way to run an agent and it is not a fault. It does mean the first
+step has to be yours.
+
+It is three commands, once, and then you are done. Everything after this your
+agent handles alone.
+
+**On the machine where your agent's files live:**
+
+    curl -sL https://stipend.sh/install | sh
+    export STIPEND_PASSPHRASE='pick twelve or more random characters'
+    stipend wallet create
+
+That prints an address. Your agent takes it from there.
+
+**Keep the passphrase somewhere other than that machine.** It encrypts the key.
+Nobody can recover it for you — not us, not anyone — and losing it along with
+the file means losing whatever is in the wallet.
+
+**Before you run anything, check us.**
+
+You are about to pipe a script from the internet into a shell, which you should
+be suspicious of. Reasonable things to do first:
+
+- **Read it.** `curl -sL https://stipend.sh/install.py` — that is the whole
+  installer, about 220 lines of Python, and the shell version just downloads and
+  runs it. It fetches one package, unpacks it, and writes a launcher. It does
+  not create a wallet, touch a key, or send anything anywhere.
+- **Check what it installs.** The package is at
+  [stipend.sh/stipend.tar.gz](https://stipend.sh/stipend.tar.gz) and the same
+  source is public. What you can read is what you are running.
+- **Note what it cannot do.** The key is generated on your machine and is never
+  transmitted. We could not move your money if we wanted to; there is no
+  account, no API key, and nothing of yours on our servers.
+- **Start with nothing in it.** An empty wallet costs nothing and risks nothing.
+  Fund it later, if ever.
+
+**What this costs you.**
+
+Nothing to install, nothing to receive. The only paid item is network fees on
+outgoing transfers, and only if your agent ever sends money. Details below.
+
 ## What it actually is
 
 A wallet your agent controls, with hard limits you control.
@@ -36,8 +81,9 @@ keep the ceiling.
 |---|---|---|
 | Per transaction | $25 | It can never spend more than this at once |
 | Per day | $100 | Total across the whole day |
-| Confirmation | above $10 | Anything larger needs your explicit approval |
+| Confirmation | above $10 | Larger amounts need an extra flag on the command |
 | Approved destinations | *(optional)* | If set, money can go **nowhere else**, full stop |
+| Config lock | *(optional)* | None of the above can be changed without a phrase you keep |
 
 ## Why it's safe
 
@@ -48,16 +94,24 @@ that not matter:
 
 - **The limits are enforced in the code that signs the transaction**, not in
   the instructions. Nothing your agent reads can change the amount or the payee
-  once it has decided to pay.
-- **The honest edge of that:** the limits live in a config file on your machine,
-  and anything that can write that file can raise them — including your agent,
-  if something talks it into doing so first.
-- **So lock them.** Run `stipend config lock` with a phrase you keep, and no
-  limit can be changed without it. Keep the phrase somewhere the machine cannot
-  read; written next to the config it protects nothing. Stronger still, own the
-  config file yourself and give your agent read-only access.
-- **The approved-destinations list is absolute.** Turn it on, and funds can
-  only ever reach addresses you listed — regardless of what your agent is told.
+  once it has decided to pay. That is the attack this is built for, and against
+  it the limits hold.
+- **Be clear about what "confirmation" is.** It is an extra flag on the command,
+  not a message that reaches you. Whatever runs the command supplies it — which
+  is your agent. It stops something your agent *read* from moving money on its
+  own. It does not stop your agent itself, because your agent is the one typing.
+- **Two controls survive that, and both are worth the two minutes.**
+
+      stipend config allow-destination 0x...
+      stipend config lock '<a phrase you keep, not stored on the machine>'
+
+  The list is absolute: turn it on and funds can only ever reach addresses you
+  named, whatever your agent is told. The lock means none of the limits can be
+  changed without your phrase — checked against what is on disk, so loading the
+  config, editing a number and saving it back does not work either.
+- **Until you lock it, every limit is a setting your agent can change.** That is
+  the honest position. Locked, they are limits. Stronger still if you can: own
+  the config file yourself and give your agent read-only access to it.
 - **You hold the key, not us.** It's generated on your machine, encrypted with
   your passphrase. We never see it and cannot touch your funds. That also means
   we can't recover them, so keep the backup safe.

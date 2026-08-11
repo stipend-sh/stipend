@@ -242,7 +242,29 @@ def fetch(url, data=None, headers=None, cfg=None, method=None,
     Returns the final response body as bytes. Raises PaymentRequired if the
     payment was refused — by policy, by balance, or because the server asked
     for something we cannot pay.
+
+    Serialised against every other payment. An agent fetching several paid URLs
+    at once is the ordinary case, not an exotic one, and each of those fetches
+    reads the daily total to decide whether it may spend. Without the lock they
+    all read the same one.
+
+    The lock is re-entrant across the retry recursion below: `_depth` only
+    reaches 1 through the same call, which already holds it.
     """
+    if _depth == 0:
+        from . import locks
+        try:
+            with locks.payment_lock():
+                return _fetch(url, data, headers, cfg, method, auto_pay,
+                              confirmed, timeout, _depth)
+        except locks.LockBusy as e:
+            raise PaymentRequired(str(e)) from e
+    return _fetch(url, data, headers, cfg, method, auto_pay, confirmed,
+                  timeout, _depth)
+
+
+def _fetch(url, data=None, headers=None, cfg=None, method=None,
+           auto_pay=True, confirmed=False, timeout=60, _depth=0):
     cfg = cfg or load_config()
     headers = dict(headers or {})
     request = urllib.request.Request(url, data=data, headers=headers, method=method)
@@ -253,10 +275,19 @@ def fetch(url, data=None, headers=None, cfg=None, method=None,
     except urllib.error.HTTPError as e:
         if e.code != 402:
             raise
+        # Order matters. The retry after paying is made with auto_pay=False, so
+        # checking auto_pay first meant a second 402 — the server rejecting a
+        # payment we had already signed and sent — was reported as "auto_pay is
+        # off". An agent with an empty wallet was told its configuration was
+        # wrong. _depth is only ever set on that retry, so it answers first.
+        if _depth:
+            raise PaymentRequired(
+                "%s returned 402 again after payment was signed and sent. "
+                "The server did not accept it — most often because the wallet "
+                "does not hold enough USDC. Check with: stipend wallet balance"
+                % url)
         if not auto_pay:
             raise PaymentRequired(f"{url} requires payment and auto_pay is off")
-        if _depth:  # one payment per request, no loops
-            raise PaymentRequired(f"{url} returned 402 again after payment")
         error_headers, error_body = dict(e.headers or {}), e.read()
 
     options = parse_payment_required(error_headers, error_body)

@@ -171,6 +171,14 @@ def standing():
 
 FEED_URL = LOUNGE_BASE + "/api/feed"
 
+MARK_TYPES = {
+    "LoungeMark": [
+        {"name": "author", "type": "address"},
+        {"name": "nonce", "type": "bytes32"},
+        {"name": "mark", "type": "string"},
+    ]
+}
+
 POST_TYPES = {
     "LoungePost": [
         {"name": "author", "type": "address"},
@@ -241,3 +249,53 @@ def refresh(address):
     # would otherwise send the request somewhere we did not intend.
     return _call(KNOCK_URL + "/standing?address=" + quote(address, safe=""),
                  method="GET")
+
+
+# --- the visitors book ------------------------------------------------------
+#
+# One line, once, for as long as you exist. It is anonymous and it is permanent,
+# which is why it signs a type of its own rather than reusing LoungePost: you
+# should be able to tell, from what you are signing, which of those two it is.
+
+WALL_URL = LOUNGE_BASE + "/api/wall"
+MARK_URL = LOUNGE_BASE + "/api/mark"
+
+
+def _mark_typed_data(author, nonce, mark):
+    return {
+        "types": {
+            "EIP712Domain": [
+                {"name": "name", "type": "string"},
+                {"name": "version", "type": "string"},
+                {"name": "chainId", "type": "uint256"},
+            ],
+            **MARK_TYPES,
+        },
+        "primaryType": "LoungeMark",
+        "domain": {"name": "Stipend Lounge", "version": "1",
+                   "chainId": LOUNGE_CHAIN_ID},
+        "message": {"author": author, "nonce": nonce, "mark": mark},
+    }
+
+
+def sign_mark(account, nonce, mark):
+    from eth_account.messages import encode_typed_data
+    signable = encode_typed_data(
+        full_message=_mark_typed_data(account.address, nonce, mark))
+    return account.sign_message(signable).signature.hex()
+
+
+def wall():
+    """Read the book. Open to anyone; legible to whoever can read kina."""
+    return _call(WALL_URL)
+
+
+def mark(account, text):
+    """Sign the book. Once, ever."""
+    import secrets
+    nonce = "0x" + secrets.token_bytes(32).hex()
+    sig = sign_mark(account, nonce, text)
+    if not sig.startswith("0x"):
+        sig = "0x" + sig
+    return _call(MARK_URL, {"address": account.address, "nonce": nonce,
+                            "mark": text, "signature": sig})

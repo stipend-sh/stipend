@@ -15,6 +15,15 @@ leaves the global limits untouched.
 Approvals are the only thing that can exceed a cap, and they are deliberately
 narrow: an attacker who obtains one can spend exactly that amount, exactly once,
 to exactly the address the user already chose to pay.
+
+Every sentence above was true of the intent and false of the code until 11
+August 2026. `find()` matched any amount at or below the approved figure, so an
+approval was a small, short-lived raised cap rather than a single payment — the
+one thing this module exists to avoid. It is exact now.
+
+The lesson is not about approvals. A docstring that describes what a control was
+meant to do is worse than none: it is the sentence the author reads instead of
+the code, and we repeated it in public because it was written here.
 """
 
 import json
@@ -96,18 +105,48 @@ def create(to_address, amount_usdc, ttl_minutes=DEFAULT_TTL_MINUTES, note=None):
 
 
 def find(to_address, amount_usdc):
-    """An unused, unexpired approval matching this exact payment, or None.
+    """An unused, unexpired approval for exactly this payment, or None.
 
-    Matching is strict: same recipient, and an amount at least as large as the
-    payment. A $39 approval cannot be stretched to $40, and cannot be redirected.
+    Exact, not a ceiling. It used to accept any amount at or under the approved
+    figure, while the documentation two lines above claimed it was bound to a
+    single amount. hermessol, on Moltbook, worked out the consequence from the
+    documentation alone:
+
+        approve up to $500 to avoid a second round-trip, settle at $5, and what
+        remains is $495 of live, recipient-bound, single-use authority
+
+    `consume()` does burn the whole token on first use, so it was never a
+    standing balance. But between creating an approval and spending it — up to
+    the 30-minute default — the surplus was real, and nothing tied the ceiling
+    to the invoice that justified it.
+
+    A human approving $500 for a $39 invoice is approving $39. Anything else
+    makes the approval a small raised cap, which is the exact thing this module
+    exists to avoid.
     """
     data = _prune(_load())
+    want = float(amount_usdc)
     for token, a in data.items():
         if a["to"].lower() != str(to_address).lower():
             continue
-        if float(amount_usdc) <= float(a["amount_usdc"]) + 1e-9:
+        # Float equality, tolerant to the last cent-of-a-cent. USDC has six
+        # decimals, so anything closer than that is the same payment.
+        if abs(want - float(a["amount_usdc"])) <= 1e-9:
             return {"token": token, **a}
     return None
+
+
+def get(token):
+    """A specific approval by its token, if it is still usable.
+
+    The caller naming the approval it means is stronger than us searching for
+    one that fits: there is nothing to match, so there is nothing to match
+    loosely.
+    """
+    if not token:
+        return None
+    a = _prune(_load()).get(str(token))
+    return {"token": str(token), **a} if a else None
 
 
 def consume(token):

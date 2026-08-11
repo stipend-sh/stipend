@@ -51,6 +51,70 @@ def _encode_transfer(to_address, units):
     return "0x" + SEL_TRANSFER + _pad(to_address) + _pad(format(units, "x"))
 
 
+# keccak("Transfer(address,address,uint256)") — every ERC-20 emits this, so it
+# is the only reliable way to learn you were paid without being online at the
+# time. A balance tells you the total; it does not tell you who or when.
+TRANSFER_TOPIC = ("0xddf252ad1be2c89b69c2b068fc378daa"
+                  "952ba7f163c4a11628f55a4df523b3ef")
+
+
+def incoming_transfers(address, from_block, cfg=None, to_block="latest"):
+    """Every USDC transfer into `address` since `from_block`.
+
+    Returns dicts with from/amount/tx/block/log_index. The log index matters:
+    two transfers of the same amount from the same payer in one transaction are
+    otherwise indistinguishable, and deduplicating on the transaction hash alone
+    would silently drop one.
+    """
+    p = chain_params(cfg)
+    topics = [TRANSFER_TOPIC, None, "0x" + _pad(address)]
+
+    # Public RPCs cap how many blocks one eth_getLogs may cover, and answer a
+    # wider range with HTTP 413 rather than a JSON error. Asking for the whole
+    # lookback in one call failed on the default endpoint for every wallet —
+    # found the first time this ran against a real payment.
+    lo = int(from_block, 16) if isinstance(from_block, str) else int(from_block)
+    hi = block_number(cfg) if to_block in (None, "latest") else (
+        int(to_block, 16) if isinstance(to_block, str) else int(to_block))
+
+    logs = []
+    step = 9000
+    while lo <= hi:
+        top = min(lo + step, hi)
+        try:
+            logs.extend(_rpc("eth_getLogs", [{
+                "address": p["usdc"], "fromBlock": hex(lo), "toBlock": hex(top),
+                "topics": topics,
+            }], cfg=cfg) or [])
+        except ChainError:
+            # Some endpoints allow less than others. Halve and retry rather than
+            # giving up on the whole sync for one greedy window.
+            if step <= 500:
+                raise
+            step //= 2
+            continue
+        lo = top + 1
+
+    out = []
+    for lg in logs:
+        try:
+            units = int(lg["data"], 16)
+            out.append({
+                "from": "0x" + lg["topics"][1][-40:],
+                "amount_usdc": from_units(units, p["decimals"]),
+                "tx": lg["transactionHash"],
+                "block": int(lg["blockNumber"], 16),
+                "log_index": int(lg.get("logIndex", "0x0"), 16),
+            })
+        except (KeyError, ValueError, IndexError):
+            continue        # a malformed log must not stop the rest
+    return out
+
+
+def block_number(cfg=None):
+    return int(_rpc("eth_blockNumber", [], cfg=cfg), 16)
+
+
 def usdc_balance(address, cfg=None):
     """USDC balance as a float."""
     p = chain_params(cfg)
@@ -99,7 +163,8 @@ def preflight(from_address, to_address, amount_usdc, cfg=None):
     return findings
 
 
-def send_usdc(account, to_address, amount_usdc, cfg=None, dry_run=False):
+def send_usdc(account, to_address, amount_usdc, cfg=None, dry_run=False,
+              on_signed=None):
     """Sign and broadcast a USDC transfer.
 
     `account` is an eth_account LocalAccount. Policy checks must already have
@@ -142,6 +207,18 @@ def send_usdc(account, to_address, amount_usdc, cfg=None, dry_run=False):
 
     signed = account.sign_transaction(tx)
     raw = signed.raw_transaction if hasattr(signed, "raw_transaction") else signed.rawTransaction
+
+    # The hash is known before the transaction is broadcast, which is the only
+    # reason this is recoverable at all. Write it down first: if this process
+    # dies between the broadcast and the bookkeeping, the money has moved and
+    # the only evidence left is what was on disk beforehand.
+    #
+    # hermessol made the point on Moltbook that our concurrency test checked the
+    # ledger against itself and so could not catch exactly this. They were right.
+    known = getattr(signed, "hash", None)
+    if on_signed is not None and known is not None:
+        on_signed("0x" + known.hex().replace("0x", ""))
+
     tx_hash = _rpc("eth_sendRawTransaction", ["0x" + raw.hex().replace("0x", "")], cfg=cfg)
 
     return {
@@ -149,6 +226,16 @@ def send_usdc(account, to_address, amount_usdc, cfg=None, dry_run=False):
         "amount_usdc": amount_usdc, "chain": p["name"],
         "explorer": p["explorer"] + tx_hash if tx_hash else None,
     }
+
+
+def receipt(tx_hash, cfg=None):
+    """The receipt if it is mined, None if the network has not seen it yet.
+
+    One request, no waiting. `wait_for_receipt` blocks and is for the caller who
+    just sent something; this is for the caller asking what happened to a
+    transfer it may have signed before it died.
+    """
+    return _rpc("eth_getTransactionReceipt", [tx_hash], cfg=cfg)
 
 
 def wait_for_receipt(tx_hash, cfg=None, attempts=30, delay=4):

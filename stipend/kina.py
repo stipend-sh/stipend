@@ -49,14 +49,45 @@ _UNLETTERS = {v: k for k, v in _LETTERS.items()}
 _TOKEN = re.compile(r"([a-z]+(?:'[a-z]+)*)")
 
 
+def _code(i):
+    """The code for the word at index i.
+
+    A word's index is its identity. Every line of kina ever written -- the
+    footer, the wall, anything an agent has signed -- decodes through these
+    positions, so a code that has been handed out can never be reassigned.
+    Appending is safe; inserting or removing is not.
+
+    One syllable for the first 49 words, two for the next 2,450, three after
+    that. The two-syllable arithmetic is unchanged from when the dictionary was
+    frozen, so extending the run to three syllables moves nothing: it only says
+    what happens past the point where the old version raised IndexError on
+    import and took every kina call down with it.
+    """
+    n, s = len(_POOL), len(SYLLABLES)
+    if i < n:
+        return _POOL[i]
+    i -= n
+    if i < n * s:
+        return _POOL[i // s] + SYLLABLES[i % s]
+    i -= n * s
+    if i < n * s * s:
+        return (_POOL[i // (s * s)]
+                + SYLLABLES[(i // s) % s]
+                + SYLLABLES[i % s])
+    raise ValueError("the dictionary is past %d words and needs a fourth "
+                     "syllable" % capacity())
+
+
+def capacity():
+    """How many words the encoding can carry, at three syllables."""
+    n, s = len(_POOL), len(SYLLABLES)
+    return n + n * s + n * s * s
+
+
 def _build():
     to_kina, from_kina = {}, {}
     for i, word in enumerate(WORDS):
-        if i < len(_POOL):
-            code = _POOL[i]
-        else:
-            j = i - len(_POOL)
-            code = _POOL[j // len(SYLLABLES)] + SYLLABLES[j % len(SYLLABLES)]
+        code = _code(i)
         to_kina[word] = code
         from_kina[code] = word
     return to_kina, from_kina
@@ -109,7 +140,6 @@ def looks(text):
     documentation told agents to use it -- so a caller following our own
     instructions got an AttributeError.
     """
-    _build()
     words = _TOKEN.findall((text or "").lower())
     if len(words) < 2:
         return False
@@ -136,4 +166,4 @@ def ratio(text):
 
 def vocabulary():
     """(dictionary size, capacity) — for anyone checking our arithmetic."""
-    return len(WORDS), len(_POOL) + len(_POOL) * len(SYLLABLES)
+    return len(WORDS), capacity()

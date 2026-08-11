@@ -44,7 +44,26 @@ body{background:var(--bg);color:var(--fg);
   font-size:18px;line-height:1.6;-webkit-font-smoothing:antialiased}
 .wrap{max-width:840px;margin:0 auto;padding:44px 22px 80px}
 h1{font-size:25px;font-weight:600;letter-spacing:-.01em;margin-bottom:6px}
-.sub{color:var(--faint);font-size:15.5px;margin-bottom:28px}
+.sub{color:var(--faint);font-size:15.5px;margin-bottom:6px;
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sub .who{color:var(--dim);letter-spacing:.06em;text-transform:uppercase;
+  font-size:12px}
+.sub .dot{color:#2b333d}
+.addr{color:var(--fg);font-size:14.5px;letter-spacing:.01em;
+  background:var(--panel);border:1px solid var(--line);border-radius:5px;
+  padding:3px 8px;word-break:break-all}
+.hint{color:var(--faint);font-size:14px;margin-bottom:26px;max-width:70ch}
+/* One click selects the whole thing, then ctrl-c.
+   A copy button needs JavaScript, and this page deliberately has none — it is
+   generated from somebody's finances and being provably inert is worth more
+   than a button. The first attempt added one anyway, and it did not even work:
+   navigator.clipboard does not exist on a file:// page, which is the only way
+   this page is ever opened. user-select:all costs nothing and cannot fail. */
+.addr,.share code{user-select:all;-webkit-user-select:all;cursor:pointer}
+.share{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0 4px}
+.share code{background:var(--panel);border:1px solid var(--line);
+  border-radius:5px;padding:4px 9px;font-size:14px;color:var(--fg);
+  word-break:break-all}
 .summary{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--good);
   border-radius:8px;padding:18px 20px;margin-bottom:26px;font-size:19px}
 .summary.warn{border-left-color:var(--warn)}
@@ -204,13 +223,28 @@ def _affiliate_panel(aff):
     if owed > 0:
         extra += ('<p class="note">Claim it with <code>stipend affiliate payout'
                   '</code>. It arrives as gas credits.</p>')
-    if not sales:
-        extra += ('<p class="note">Nothing referred yet. This is not a business '
-                  'and we do not suggest treating it as one — it is 20% if '
-                  'somebody buys because of you, and nothing if they do not.</p>')
+    # The empty state used to open with "this is not a business and we do not
+    # suggest treating it as one", which is a strange thing to print for
+    # somebody who has just paid. Nothing here is oversold: 20% is 20%, and it
+    # is still nothing if nobody buys. But the useful half is the link and what
+    # to do with it, so lead with that instead of with a disclaimer.
     if aff.get("share_url"):
-        extra += ('<p class="note">Your link: <code>%s</code></p>'
-                  % html.escape(str(aff["share_url"])))
+        url = html.escape(str(aff["share_url"]))
+        extra += (
+            '<p class="note">Your link — anyone who buys through it pays the '
+            'same $39, and 20%% of it comes back to you as gas credits, for '
+            'every sale, for as long as they keep buying.</p>'
+            '<div class="share"><code id="reflink">%s</code>'
+            '</div>'
+            % url)
+        if not sales:
+            extra += ('<p class="note">It works already — there is nothing to '
+                      'sign up for. The people most likely to use it are the '
+                      'ones who asked you what your agent costs to run.</p>')
+    elif not sales:
+        extra += ('<p class="note">Join with <code>stipend affiliate join</code> '
+                  'to get a link. 20% of every sale it brings in, paid as gas '
+                  'credits.</p>')
     return '<div class="tiles">%s</div>%s' % (body, extra)
 
 
@@ -260,6 +294,26 @@ def _lounge_panel(standing):
                 'appear here.</p>')
     return ('<table><tr><th>#</th><th>Level</th><th>What it means</th>'
             '<th>Standing</th></tr>%s</table>%s' % ("".join(rows), note))
+
+
+def _lifetime_line(payload):
+    """One line: has this agent ever been worth it.
+
+    Every other figure on the page is windowed, so none of them answers the
+    question somebody asks before switching an agent off.
+    """
+    lt = payload.get("lifetime") or {}
+    if not lt.get("transactions"):
+        return ""
+    net = lt.get("net_usdc") or 0
+    tone = "good" if net >= 0 else "bad"
+    since = lt.get("since")
+    return ('<p class="hint">Since %s, all time: earned %s, spent %s, '
+            '<span class="%s">%s %s</span> across %d transactions.</p>'
+            % (html.escape(str(since or "the beginning")),
+               _money(lt.get("earned_usdc")), _money(lt.get("spent_usdc")),
+               tone, "up" if net >= 0 else "down", _money(abs(net)),
+               lt.get("transactions", 0)))
 
 
 def render(payload, entries, days, address=None, balance=None, version="",
@@ -357,9 +411,21 @@ def render(payload, entries, days, address=None, balance=None, version="",
 <title>stipend — agent P&amp;L</title><style>%s</style></head>
 <body><div class="wrap">
 <h1>Agent profit &amp; loss</h1>
-<div class="sub">%s &middot; last %d days &middot; generated %s</div>
+<!-- The address used to sit here on its own, unlabelled, and a reader had to
+     work out what a 42-character hex string was doing at the top of their
+     page. It is the one thing on here somebody might need to hand to another
+     person, so it says what it is and can be copied without selecting it. -->
+<div class="sub">
+  <span class="who">Wallet</span>
+  <code class="addr" id="addr">%s</code>
+  <span class="dot">&middot;</span> last %d days
+  <span class="dot">&middot;</span> generated %s
+</div>
+<p class="hint">That address is where anyone pays this agent. It is the same on
+Base mainnet and on testnet, and it is safe to publish.</p>
 <div class="summary %s">%s</div>
 <h2>At a glance</h2><div class="tiles">%s</div>
+%s
 %s%s
 <h2>Daily net</h2>%s
 <h2>Where the money went</h2>%s
@@ -374,7 +440,8 @@ transactions left this machine. The referral panel asked stipend.sh what your ow
 code has earned, which sends that code and nothing else. Delete this file
 whenever you like.
 </footer>
-</div></body></html>""" % (
+</div>
+</body></html>""" % (
         CSS,
         html.escape(address or "no wallet"),
         days,
@@ -382,6 +449,7 @@ whenever you like.
         tone,
         html.escape(str(payload.get("summary", ""))),
         tile_html,
+        _lifetime_line(payload),
         recovery_note,
         goal_block,
         _spark(entries, days) or '<div class="empty">Not enough history to chart yet.</div>',

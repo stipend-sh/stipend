@@ -166,7 +166,12 @@ def run():
         d.update(kw)
         return d
 
-    base = dict(config.DEFAULT_CONFIG)
+    # Pinned, not inherited. These cases are written about a wallet on testnet
+    # being offered various things, so they have to say so: reading the chain
+    # out of DEFAULT_CONFIG meant that changing the default silently rewrote
+    # what every assertion below was testing, and the whole section collapsed
+    # the moment the default became mainnet.
+    base = dict(config.DEFAULT_CONFIG, chain="base-sepolia")
 
     print("\nx402 requirement selection")
     check("valid option accepted", x402._select_requirement([R()], base)["scheme"], "exact")
@@ -192,6 +197,27 @@ def run():
     check("picks payable from mixed",
           x402._select_requirement([R(network="eip155:1"), R()], base)["network"], "eip155:84532")
 
+    # And the chain a fresh install actually ships on. Everything above is
+    # about testnet; without this, nothing here tests the default, which is the
+    # one configuration every new agent will be running.
+    live = dict(config.DEFAULT_CONFIG)
+    MAINNET_USDC = config.CHAINS["base"]["usdc"]
+
+    def M(**kw):
+        d = {"scheme": "exact", "network": "eip155:8453", "amount": "1000000",
+             "asset": MAINNET_USDC, "payTo": "0x" + "b" * 40}
+        d.update(kw)
+        return d
+
+    check("a fresh install is on mainnet", live["chain"], "base")
+    check("a mainnet offer is payable on a fresh install",
+          x402._select_requirement([M()], live)["network"], "eip155:8453")
+    check("and it is real USDC, not the testnet contract",
+          x402._select_requirement([M()], live)["asset"].lower(),
+          MAINNET_USDC.lower())
+    raises("a testnet offer is refused on mainnet",
+           lambda: x402._select_requirement([R()], live), x402.PaymentRequired)
+
     print("\nx402 header handling")
     check("base64 JSON round-trips", x402._b64_decode_json(x402._b64_encode_json({"a": 1}))["a"], 1)
     check("parses PAYMENT-REQUIRED",
@@ -201,7 +227,12 @@ def run():
     print("\nx402 EIP-3009 signing")
     try:
         acct = keystore.load_account()
-        payment = x402.build_payment(R(amount="250000"), acct)
+        # Signed and verified against the same pinned config. Left to the
+        # default, the signing side followed whatever chain shipped while
+        # the verifying side stayed pinned to the testnet token, so the two
+        # hashed different domains and the recovered address was somebody
+        # else entirely.
+        payment = x402.build_payment(R(amount="250000"), acct, cfg=base)
         auth = payment["payload"]["authorization"]
         check("x402Version", payment["x402Version"], 2)
         check("from is our address", auth["from"], acct.address)
@@ -219,7 +250,7 @@ def run():
                 {"name": "verifyingContract", "type": "address"}],
                 **x402.EIP3009_TYPES},
             "primaryType": "TransferWithAuthorization",
-            "domain": x402.token_domain(USDC),
+            "domain": x402.token_domain(USDC, cfg=base),
             "message": auth})
         check("signature recovers to signer",
               _A.recover_message(msg, signature=payment["payload"]["signature"]), acct.address)

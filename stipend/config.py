@@ -27,6 +27,13 @@ LEDGER_FILE = CONFIG_DIR / "spend-ledger.json"
 # Every time the limits stopped a payment. The product's central claim is that
 # they cannot be talked past; this is the only place that claim leaves evidence.
 REFUSALS_FILE = CONFIG_DIR / "refusals.json"
+# A signed authorisation we sent but never got an answer about. Its presence
+# means one payment is unaccounted for, and no other payment may start.
+PENDING_RELAY_FILE = CONFIG_DIR / "pending-relay.json"
+# How far the earnings watcher has read. Without it, every sync would either
+# rescan the whole chain or trust the ledger to tell it what it already has —
+# and the ledger is the thing being written.
+EARNINGS_CURSOR_FILE = CONFIG_DIR / "earnings-cursor.json"
 
 PASSPHRASE_ENV = "STIPEND_PASSPHRASE"
 
@@ -52,8 +59,24 @@ CHAINS = {
 }
 
 DEFAULT_CONFIG = {
-    # Start on testnet. Moving real money should be a deliberate act.
-    "chain": "base-sepolia",
+    # Base mainnet.
+    #
+    # This used to start on testnet, on the reasoning that moving real money
+    # should be a deliberate act. The reasoning was sound and the effect was
+    # not: the point of the free tier is that an agent can *receive* real
+    # money, so a wallet that quietly watches the wrong chain reports a balance
+    # of zero to somebody who has just been paid. Nothing warns them, because
+    # nothing is wrong — it is looking exactly where it was told to look.
+    #
+    # The safety does not come from the chain. It comes from limits enforced
+    # between deciding and signing, a key that never leaves the machine, and
+    # confirmation before any first payment to a new address. All of that is
+    # on by default and works the same on either chain.
+    #
+    #   stipend config set chain base-sepolia
+    #
+    # switches to testnet for anyone who wants to rehearse first.
+    "chain": "base",
 
     # Spending policy. These are enforced in the signing path, not in the UI,
     # so an agent cannot talk its way past them.
@@ -70,10 +93,31 @@ DEFAULT_CONFIG = {
     # regardless of amount. Blocks drain-by-many-small-payments.
     "confirm_new_destinations": True,
 
+    # Most that may go to any ONE recipient in a day. 0 means no such limit.
+    #
+    # The per-transaction and daily caps together still allow the whole daily
+    # allowance to land on a single address, which is what a compromised agent
+    # would do. This bounds that without needing to know in advance which
+    # address it would be — the allowlist handles the case where you do know.
+    #
+    # Off by default: it is a real limit and turning it on for existing installs
+    # would refuse payments those agents are making today.
+    "max_per_counterparty_usdc": 0.0,
+
     # Which tier this install is on. Display only — the licence file is
     # what actually decides, and referral commission is a flat 20% for
     # everyone regardless of tier.
     "tier": "free",
+
+    # What your inference costs, in dollars per million tokens. Set by the
+    # human, because the agent cannot know it — it counts tokens, it does not
+    # see anybody's bill.
+    #
+    # Deliberately not a table of model prices shipped with the package: those
+    # go out of date quietly, and a stale rate produces a confident number that
+    # is wrong. Unset means we record the tokens and claim no cost at all.
+    "token_rate_usd_per_million": None,
+    "token_rate_set_on": None,
 }
 
 
@@ -103,8 +147,9 @@ class ConfigLocked(Exception):
 # Which settings the lock actually protects. Everything else -- the chain, the
 # tier -- can still be changed freely, because locking those would be friction
 # without a threat behind it.
-PROTECTED = ("max_per_tx_usdc", "max_per_day_usdc", "confirm_above_usdc",
-             "confirm_new_destinations", "allowed_destinations")
+PROTECTED = ("max_per_tx_usdc", "max_per_day_usdc", "max_per_counterparty_usdc",
+             "confirm_above_usdc", "confirm_new_destinations",
+             "allowed_destinations")
 
 
 def _lock_hash(secret, salt):
@@ -198,7 +243,10 @@ def save_config(cfg, secret=None):
 
 def chain_params(cfg=None):
     cfg = cfg or load_config()
-    name = cfg.get("chain", "base-sepolia")
+    # Falls back to the same default the config does. Two different fallbacks
+    # would mean a config missing its "chain" key silently used a different
+    # chain here than everywhere else.
+    name = cfg.get("chain", DEFAULT_CONFIG["chain"])
     if name not in CHAINS:
         raise ValueError(f"Unknown chain {name!r}. Known: {', '.join(CHAINS)}")
     params = dict(CHAINS[name])

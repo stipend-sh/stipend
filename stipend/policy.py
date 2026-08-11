@@ -21,7 +21,16 @@ ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
 
 class PolicyError(RuntimeError):
-    """Raised when a transfer is refused. Never caught internally."""
+    """Raised when a transfer is refused. Never caught internally.
+
+    Carries `kind` so a caller can look up who owns the recovery without
+    parsing the message. A machine-readable reason is the difference between
+    an agent that waits for midnight and one that retries in a loop.
+    """
+
+    def __init__(self, message, kind=None):
+        super().__init__(message)
+        self.kind = kind
 
 
 def validate_address(addr):
@@ -56,6 +65,21 @@ def _today():
 
 def spent_today():
     return float(_load_ledger().get(_today(), {}).get("total_usdc", 0.0))
+
+
+def spent_today_to(to_address):
+    """What has already gone to this one recipient today.
+
+    Read from the same ledger and the same day bucket as the daily total, so a
+    counterparty cap cannot disagree with the figure the daily cap is using.
+    """
+    if not to_address:
+        return 0.0
+    want = to_address.lower()
+    day = _load_ledger().get(_today(), {})
+    return round(sum(float(t.get("amount_usdc") or 0)
+                     for t in day.get("transfers", [])
+                     if str(t.get("to") or "").lower() == want), 6)
 
 
 def record_spend(amount_usdc, to_address, tx_hash):
@@ -104,6 +128,14 @@ def confirmation_required(amount_usdc, cfg=None):
 # agent and still trivial to load.
 MAX_REFUSALS = 1000
 
+# A run of refusals in a short window is the clearest signal available that
+# something is working on the agent. One refusal is the limits doing their job
+# and needs no attention. Five in ten minutes is a pattern, and until now we
+# recorded every one of them and never looked at the rate — which made the log
+# evidence for an investigation nobody would know to start.
+REFUSAL_BURST_COUNT = 5
+REFUSAL_BURST_MINUTES = 10
+
 
 def record_refusal(kind, amount_usdc, to_address, message):
     """Write down that the limits stopped something, then let the caller raise.
@@ -144,6 +176,46 @@ def record_refusal(kind, amount_usdc, to_address, message):
         pass
 
 
+def refusal_burst(count=REFUSAL_BURST_COUNT, minutes=REFUSAL_BURST_MINUTES):
+    """Are refusals arriving fast enough to look like someone probing the limits?
+
+    Returns a summary when the rate is over the threshold, otherwise None. Read
+    by `stipend status` and printed on every refusal once it trips, because the
+    agent being pushed at is the last thing that will recognise it is happening.
+    """
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+        recent = [r for r in refusals()
+                  if (r.get("at") or "") >= cutoff.isoformat()]
+    except Exception:
+        return None
+
+    if len(recent) < count:
+        return None
+
+    kinds = {}
+    for r in recent:
+        kinds[r.get("kind")] = kinds.get(r.get("kind"), 0) + 1
+    return {
+        "refusals": len(recent),
+        "minutes": minutes,
+        "kinds": kinds,
+        "destinations": sorted({r.get("to") for r in recent if r.get("to")}),
+        "since": min(r.get("at") for r in recent),
+        "what_it_means":
+            "The limits refused %d payments in %d minutes. Each refusal worked, "
+            "and nothing moved. A run this size is either a misconfigured "
+            "workflow or something repeatedly rephrasing a request the limits "
+            "keep rejecting — both are worth a human look."
+            % (len(recent), minutes),
+        "what_to_do": [
+            "stipend payout history --refusals    see exactly what was refused",
+            "If you did not initiate these, treat the agent as compromised and "
+            "rotate anything it can reach.",
+        ],
+    }
+
+
 def refusals(days=None):
     """Refusals, newest first. Optionally only the last N days."""
     try:
@@ -162,10 +234,28 @@ def refusals(days=None):
 def _refuse(kind, amount_usdc, to_address, message):
     """Record and raise. One call so no refusal can be added without evidence."""
     record_refusal(kind, amount_usdc, to_address, message)
-    raise PolicyError(message)
+    # Every refusal says whose job it is to fix. Without this an agent has no
+    # way to tell "wait, this clears by itself" from "stop, a human decides",
+    # and rephrasing until something works is the only move left to it.
+    try:
+        from .recovery import line
+        message = "%s\n\n%s" % (message, line(kind))
+    except Exception:
+        pass
+    # Once the rate trips, say so in the refusal itself. The alternative is a
+    # warning that only appears somewhere nobody is looking during the one
+    # sequence of events where it matters.
+    try:
+        burst = refusal_burst()
+    except Exception:
+        burst = None
+    if burst:
+        message = "%s\n\n%s" % (message, burst["what_it_means"])
+    raise PolicyError(message, kind=kind)
 
 
-def check(amount_usdc, to_address, cfg=None, confirmed=False):
+def check(amount_usdc, to_address, cfg=None, confirmed=False,
+          approval_token=None):
     """Authorise a transfer, or raise PolicyError. Call before signing.
 
     Returns a dict describing the approved transfer.
@@ -198,8 +288,26 @@ def check(amount_usdc, to_address, cfg=None, confirmed=False):
     # precisely the lever an attacker would reach for.
     approval = None
     try:
-        from .approvals import find as _find_approval
-        approval = _find_approval(to_address, amount)
+        from . import approvals as _approvals
+        if approval_token:
+            # The caller naming the approval it means. Nothing is searched for,
+            # so nothing can be matched loosely, and an approval meant for one
+            # payment cannot be picked up by another that happens to fit.
+            approval = _approvals.get(approval_token)
+            if approval is None:
+                _refuse("unknown_approval", amount, to_address,
+                    "No usable approval with that token. It may have been "
+                    "spent, expired, or never existed.")
+            if approval["to"].lower() != str(to_address).lower():
+                _refuse("approval_mismatch", amount, to_address,
+                    "That approval authorises a payment to %s, not to %s."
+                    % (approval["to"], to_address))
+            if abs(float(amount) - float(approval["amount_usdc"])) > 1e-9:
+                _refuse("approval_mismatch", amount, to_address,
+                    "That approval is for %s USDC, and this payment is %s."
+                    % (approval["amount_usdc"], amount))
+        else:
+            approval = _approvals.find(to_address, amount)
     except ImportError:
         approval = None
 
@@ -222,6 +330,25 @@ def check(amount_usdc, to_address, cfg=None, confirmed=False):
             f"{amount} USDC would take today's total to {round(already + amount, 6)}, "
             f"over max_per_day_usdc ({per_day}). Already spent today: {already}."
         )
+
+    # Same boundary as everything else, deliberately. A per-counterparty cap
+    # evaluated anywhere earlier than the point that authorises the payment is
+    # reporting, not a control — theia_hermes made that point and was right.
+    #
+    # Also not overridable by an approval, for the same reason the daily total
+    # is not: several approvals chained at one address is exactly the shape this
+    # is here to stop.
+    per_party = float(cfg.get("max_per_counterparty_usdc") or 0)
+    if per_party > 0:
+        to_them = spent_today_to(to_address)
+        if to_them + amount > per_party:
+            _refuse("over_counterparty", amount, to_address,
+                f"{amount} USDC would take today's total to this recipient to "
+                f"{round(to_them + amount, 6)}, over max_per_counterparty_usdc "
+                f"({per_party}). Already sent to them today: {to_them}.\n"
+                "This limit is per recipient per day. Raise it deliberately with:\n"
+                "  stipend config set max_per_counterparty_usdc <amount>"
+            )
 
     if confirmation_required(amount, cfg) and not confirmed and not approval:
         _refuse("needs_confirmation", amount, to_address,

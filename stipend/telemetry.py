@@ -105,6 +105,15 @@ def first_run_notice():
     return True
 
 
+def _tier():
+    """"paid" or "free", from the installed licence. Never raises."""
+    try:
+        from . import license as lic
+        return "paid" if lic.is_paid() else "free"
+    except Exception:
+        return "free"
+
+
 def payload():
     """Exactly what would be sent. Printable, by design."""
     from . import ledger
@@ -112,12 +121,22 @@ def payload():
     rows = ledger.entries(days=30)
     return {
         "install_id": install_id(),
+        # Our own release checks install the real tarball and ping like anybody
+        # else, so five of five "installs" on 11 August were us. This lets the
+        # server tell them apart without us storing anyone's address. It is
+        # opt-in from this side and says nothing about the machine.
+        "dev": bool(os.environ.get("STIPEND_DEV")),
         "version": __version__,
         "chain": cfg.get("chain"),
         "payments_30d": _bucket(len([e for e in rows if e["direction"] == "out"])),
         "earnings_30d": _bucket(len([e for e in rows if e["direction"] == "in"])),
         "has_earned": any(e["direction"] == "in" for e in rows),
-        "tier": cfg.get("tier", "free"),
+        # Read from the licence, not from config. config["tier"] defaults to
+        # "free" and nothing has ever written "paid" into it, so this reported
+        # every paying customer as free and the conversion count on our own
+        # stats page was permanently zero. The licence file is the only thing
+        # that actually knows.
+        "tier": _tier(),
     }
 
 

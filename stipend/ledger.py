@@ -57,6 +57,38 @@ def record_spend(amount_usdc, to_address, category="other", note=None, tx=None):
     remember_destination(to_address)
 
 
+def record_cost(amount_usd, category="inference", note=None, tokens=None):
+    """A cost that never touched the chain — tokens, an API bill, a server.
+
+    Most of what an agent really spends is inference, and none of it is on
+    Base. Without this the P&L reads "spent $0.00" to somebody who spent forty
+    dollars on tokens yesterday, which makes the one number they paid to see
+    wrong by omission rather than by arithmetic.
+
+    Recorded in the same column as everything else. USDC is a dollar
+    stablecoin, so a dollar of inference and a dollar of USDC belong together
+    in a total that is meant to answer "what did this agent cost me".
+
+    counterparty and tx stay null, and the entry is marked so nothing
+    downstream tries to look it up on a chain it was never on. It also does not
+    remember a destination: there is nobody here to pay again.
+    """
+    _append({
+        "at": datetime.now(timezone.utc).isoformat(),
+        "direction": "out",
+        "amount_usdc": round(float(amount_usd), 6),
+        "counterparty": None,
+        "category": category if category in CATEGORIES else "other",
+        "note": note,
+        "tx": None,
+        "offchain": True,
+        # Kept even when a rate converted it to dollars: the token count is the
+        # fact, the dollar figure is an interpretation of it. If the rate later
+        # turns out to be wrong, the tokens are still right.
+        "tokens": int(tokens) if tokens else None,
+    })
+
+
 def record_earning(amount_usdc, from_address=None, category="earnings", note=None, tx=None):
     """Money in. Without this there is no P&L, only a spending report."""
     _append({
@@ -68,6 +100,65 @@ def record_earning(amount_usdc, from_address=None, category="earnings", note=Non
         "note": note,
         "tx": tx,
     })
+
+
+def sync_earnings(cfg=None, lookback_blocks=200000):
+    """Record money that arrived while nobody was watching.
+
+    Until this existed, being paid was something an agent had to notice and
+    write down itself. It was never running at the moment the money landed, so
+    the honest state of the ledger was "whatever anyone remembered".
+
+    Deduplicated on (tx, log_index), not on the transaction alone: one
+    transaction can carry two transfers to the same address, and dropping the
+    second is a silent undercount of what you earned.
+
+    Returns the entries it added, newest last.
+    """
+    import json as _json
+    from . import chain, keystore
+    from .config import EARNINGS_CURSOR_FILE, ensure_dirs
+
+    address = keystore.address()
+    ensure_dirs()
+    try:
+        cursor = _json.loads(EARNINGS_CURSOR_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        cursor = {}
+
+    head = chain.block_number(cfg)
+    start = int(cursor.get("block") or max(0, head - lookback_blocks))
+
+    seen = {(e.get("tx"), e.get("log_index")) for e in entries()
+            if e.get("direction") == "in"}
+
+    added = []
+    for t in chain.incoming_transfers(address, start, cfg):
+        if (t["tx"], t["log_index"]) in seen:
+            continue
+        _append({
+            "at": datetime.now(timezone.utc).isoformat(),
+            "direction": "in",
+            "amount_usdc": round(float(t["amount_usdc"]), 6),
+            "counterparty": t["from"],
+            "category": "earnings",
+            "note": "observed on chain",
+            "tx": t["tx"],
+            "log_index": t["log_index"],
+            "block": t["block"],
+            # Nobody signed anything to say what this was for. Marked so a
+            # human reading the ledger later is not misled into thinking the
+            # attribution is stronger than it is.
+            "attributed": False,
+        })
+        added.append(t)
+
+    # Only advance the cursor past blocks we have actually read. Recording it
+    # before the writes would lose anything that failed halfway.
+    EARNINGS_CURSOR_FILE.write_text(
+        _json.dumps({"block": head + 1, "address": address}, indent=2),
+        encoding="utf-8")
+    return added
 
 
 def entries(days=None):
@@ -131,7 +222,26 @@ def remember_destination(address, label=None):
 # P&L
 # ---------------------------------------------------------------------------
 
-def profit_and_loss(days=7):
+def lifetime():
+    """Everything, since the first entry. No window.
+
+    The windowed figures answer "how is it going"; this answers "has it ever
+    been worth it", which is the question somebody asks before deciding to stop
+    paying for an agent. Nothing else in here could answer it.
+    """
+    rows = entries(days=None)
+    earned = sum(e["amount_usdc"] for e in rows if e["direction"] == "in")
+    spent = sum(e["amount_usdc"] for e in rows if e["direction"] == "out")
+    return {
+        "earned_usdc": round(earned, 6),
+        "spent_usdc": round(spent, 6),
+        "net_usdc": round(earned - spent, 6),
+        "transactions": len(rows),
+        "since": rows[0]["at"][:10] if rows else None,
+    }
+
+
+def profit_and_loss(days=30):
     rows = entries(days=days)
     earned = sum(e["amount_usdc"] for e in rows if e["direction"] == "in")
     spent = sum(e["amount_usdc"] for e in rows if e["direction"] == "out")
@@ -158,7 +268,7 @@ def profit_and_loss(days=7):
     }
 
 
-def daily_burn(days=7):
+def daily_burn(days=30):
     """Average USDC out per day. The denominator for runway."""
     rows = [e for e in entries(days=days) if e["direction"] == "out"]
     if not rows:
@@ -175,7 +285,7 @@ def _days_spanned(rows):
         return 1
 
 
-def runway(balance_usdc, days=7):
+def runway(balance_usdc, days=30):
     """How long the money lasts at the current rate.
 
     Reported so an agent can warn its human BEFORE it stops working, which is
@@ -206,7 +316,7 @@ def runway(balance_usdc, days=7):
     }
 
 
-def report(balance_usdc, days=7):
+def report(balance_usdc, days=30):
     """The whole picture, in the shape an agent can relay to its human."""
     pnl = profit_and_loss(days)
     run = runway(balance_usdc, days)
@@ -307,7 +417,10 @@ def goal_progress(balance_usdc=None, days=30):
     elif kind == "breakeven":
         achieved, needed = earned, spent
     else:  # runway
-        burn = daily_burn(days=7)
+        # Follow the window that was asked for. This was pinned at 7 while the
+        # rest of the report moved, so a 30-day view showed a runway derived
+        # from a week of spending — two different periods in one sentence.
+        burn = daily_burn(days=days)
         achieved = (balance_usdc / burn) if burn > 0 and balance_usdc is not None else 0.0
         needed = goal["amount"]
 

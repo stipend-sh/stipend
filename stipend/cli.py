@@ -107,13 +107,156 @@ def cmd_wallet_balance(args):
 # payout
 # ---------------------------------------------------------------------------
 
+def cmd_recover(args):
+    """What is outstanding, and whose job each item is.
+
+    Three people asked, independently, who owns recovery when something fails.
+    We had no answer, which meant the honest one was "nobody" — and an agent
+    with no owner for a failure treats rephrasing as the only move available.
+
+    Every entry names an owner: agent, time, human, or reconcile.
+    """
+    from . import recovery, relay
+    items = []
+
+    try:
+        stuck = relay.unresolved()
+    except relay.PendingUnreadable as e:
+        stuck = None
+        items.append({"what": "damaged outstanding-payment record",
+                      "detail": str(e).splitlines()[0],
+                      **recovery.ownership("pending_unreadable")})
+    if stuck:
+        items.append({
+            "what": "payment sent but never confirmed",
+            "to": stuck.get("to"), "amount_usdc": stuck.get("amount_usdc"),
+            "fix": "stipend payout resolve",
+            **recovery.ownership("unresolved_payment")})
+
+    burst = policy.refusal_burst()
+    if burst:
+        items.append({"what": "refusals arriving unusually fast",
+                      "detail": burst["what_it_means"],
+                      "owner": recovery.HUMAN,
+                      "what_happens_next": "Someone should look at what is "
+                                           "being attempted and why.",
+                      "agent_may_retry": False})
+
+    # Anything refused recently that only a human can clear. A limit that reset
+    # overnight is not outstanding, so `time`-owned refusals are left out.
+    seen = set()
+    for r in policy.refusals(days=1):
+        kind = r.get("kind")
+        own = recovery.ownership(kind)
+        key = (kind, r.get("to"))
+        if own["owner"] == recovery.HUMAN and key not in seen:
+            seen.add(key)
+            items.append({"what": "refused: " + str(kind),
+                          "to": r.get("to"), "amount_usdc": r.get("amount_usdc"),
+                          "at": r.get("at"), **own})
+
+    waiting = [i for i in items if i["owner"] == recovery.HUMAN]
+    return out({
+        "ok": True,
+        "outstanding": items,
+        "needs_a_human": len(waiting),
+        "summary": ("Nothing outstanding." if not items else
+                    "%d item(s) outstanding, %d needing a human."
+                    % (len(items), len(waiting))),
+    })
+
+
+def cmd_earnings_sync(args):
+    """Find money that arrived while you were not running.
+
+    An address makes you payable. It does not tell you that you were paid, and
+    it does not tell you what for. This closes the first half — the second half
+    needs the payer to sign something, and we do not have that yet.
+    """
+    from . import ledger
+    cfg = config.load_config()
+    try:
+        added = ledger.sync_earnings(cfg)
+    except (keystore.KeystoreError, chain.ChainError) as e:
+        return err(e)
+    return out({
+        "ok": True,
+        "new_payments": len(added),
+        "payments": added,
+        "attribution": "none — an incoming transfer carries an amount and a "
+                       "sender, and nothing that says what it was for. These "
+                       "are recorded as unattributed on purpose.",
+    })
+
+
+def cmd_payout_resolve(args):
+    """Find out what happened to a payment we never got an answer about.
+
+    This exists because the dangerous case is not a failed payment, it is an
+    unknown one. Asking the server about the nonce is the only way to tell the
+    difference, and it is the difference between settling and paying twice.
+    """
+    from . import locks, relay
+    try:
+        with locks.payment_lock():
+            return _payout_resolve(args)
+    except locks.LockBusy as e:
+        return err(e, hint="Nothing was sent. A payment is in progress; run "
+                           "this once it has finished.")
+
+
+def _payout_resolve(args):
+    from . import relay
+    cfg = config.load_config()
+
+    if not relay.unresolved():
+        return out({"ok": True, "unresolved": None,
+                    "what_it_means": "Every payment is accounted for."})
+
+    try:
+        result = relay.resolve(cfg)
+    except relay.RelayError as e:
+        return err(e, hint="Still unresolved. Nothing was sent again — run this "
+                           "once stipend.sh is reachable.")
+
+    # Only a payment that actually moved gets settled: it burns the approval and
+    # counts against the daily limit, exactly as the first attempt would have.
+    if result.get("relayed") and result.get("tx_hash"):
+        approved = result.get("approved")
+        if approved:
+            policy.settle(approved, result.get("tx_hash"))
+        from . import ledger
+        ledger.record_spend(result.get("amount_usdc") or 0, result.get("to") or "",
+                            category=None, tx=result.get("tx_hash"))
+    return out({"ok": True, **{k: v for k, v in result.items() if k != "approved"}})
+
+
 def cmd_payout_send(args):
+    """Serialised. The check, the send and the record are one unit.
+
+    The limits are read inside the lock as well as enforced there: a daily total
+    fetched before the lock is a number another payment can invalidate while
+    this one is still deciding, which is precisely how $160 went out against a
+    $100 cap.
+    """
+    from . import locks
+    try:
+        with locks.payment_lock():
+            return _payout_send(args)
+    except locks.LockBusy as e:
+        return err(e, hint="Nothing was sent. Try again when the other payment "
+                           "has finished.")
+
+
+def _payout_send(args):
     cfg = config.load_config()
 
     # 1. Policy first — before the key is ever decrypted. A refused transfer
     #    must not require touching the private key at all.
     try:
-        approved = policy.check(args.amount, args.to, cfg, confirmed=args.confirm)
+        approved = policy.check(args.amount, args.to, cfg,
+                                confirmed=args.confirm,
+                                approval_token=getattr(args, "approval", None))
     except policy.PolicyError as e:
         return err(e, hint="This is a policy refusal, not a network failure.")
 
@@ -133,7 +276,8 @@ def cmd_payout_send(args):
         from . import relay
         try:
             account = keystore.load_account()
-            result = relay.send(account, approved["to"], approved["amount_usdc"], cfg)
+            result = relay.send(account, approved["to"], approved["amount_usdc"], cfg,
+                                approved=approved)
         except relay.RelayError as e:
             return err(
                 f"No ETH on {pre['chain']} to pay gas, and the relay could not "
@@ -157,10 +301,18 @@ def cmd_payout_send(args):
             hint="USDC transfers still need a small amount of ETH for gas on Base.")
 
     # 3. Decrypt, sign, send.
+    from . import relay as _relay
+
+    def _remember(tx_hash):
+        """Durable note that this transfer was signed, written before it goes out."""
+        _relay.remember_direct(tx_hash, approved["to"], approved["amount_usdc"],
+                               approved)
+
     try:
         account = keystore.load_account()
         result = chain.send_usdc(account, approved["to"], approved["amount_usdc"],
-                                 cfg, dry_run=args.dry_run)
+                                 cfg, dry_run=args.dry_run,
+                                 on_signed=None if args.dry_run else _remember)
     except (keystore.KeystoreError, chain.ChainError) as e:
         return err(e)
     finally:
@@ -173,6 +325,9 @@ def cmd_payout_send(args):
     from . import ledger
     ledger.record_spend(approved["amount_usdc"], approved["to"],
                         category=args.category, tx=result.get("tx_hash"))
+    # Cleared last, after the money is accounted for. Anything that dies before
+    # this point leaves the note behind for `stipend payout resolve`.
+    _relay.forget_direct()
 
     if args.wait:
         result["receipt"] = chain.wait_for_receipt(result["tx_hash"], cfg)
@@ -220,6 +375,11 @@ def cmd_report(args):
         if (progress["goal"] or {}).get("kind") != "breakeven":
             payload["summary"] += " " + progress["message"]
 
+    # The window says how it is going; this says whether it has ever been worth
+    # it. Different question, and the one a human asks before switching an agent
+    # off.
+    payload["lifetime"] = ledger.lifetime()
+
     if getattr(args, "html", False):
         # The JSON above is free and always will be — that is what an agent
         # reads. The rendered dashboard is for the human paying the bills, and
@@ -262,6 +422,22 @@ def cmd_report(args):
                     "note": "Written locally and opened in your browser. Nothing "
                             "was transmitted — there is no hosted dashboard and "
                             "no account, by design."})
+
+    # Two things a human needs to see the moment they look, ahead of any
+    # numbers: money we cannot account for, and limits being hammered.
+    from . import relay
+    stuck = relay.unresolved()
+    if stuck:
+        payload["unresolved_payment"] = {
+            "to": stuck.get("to"), "amount_usdc": stuck.get("amount_usdc"),
+            "what_it_means": "This payment was sent but never confirmed, so it "
+                             "may or may not have gone through. No further "
+                             "payment can start until it is settled.",
+            "what_to_do": "stipend payout resolve",
+        }
+    burst = policy.refusal_burst()
+    if burst:
+        payload["refusal_burst"] = burst
 
     return out({"ok": True, **payload})
 
@@ -404,12 +580,121 @@ def cmd_credits_buy(args):
 
 
 def cmd_credits_claim(args):
-    from . import relay
+    """Turn a purchase into credits, and into the dashboard it also paid for.
+
+    The $39 pack is two things — 6,000 gas credits and the rendered dashboard —
+    and one key carries both. Installing the licence used to need a second
+    command, `stipend license add`, which nothing we publish mentions: not the
+    page after checkout, not the receipt, not the paywall itself. So a buyer ran
+    the documented command, got their credits, opened the dashboard, and was
+    told to buy the thing they had just bought — by an error message naming the
+    command they had already run.
+
+    One key, one command. A credits-only key is not a licence and simply does
+    not unlock anything, which is not an error.
+    """
+    from . import relay, license as lic
     try:
         address = args.address or keystore.address()
-        return out({"ok": True, **relay.claim(args.key, address)})
+        result = relay.claim(args.key, address)
     except (keystore.KeystoreError, relay.RelayError) as e:
         return err(e)
+
+    dashboard = False
+    try:
+        payload = lic.install(args.key)
+        dashboard = bool(payload and payload.get("tier") == "paid")
+    except (lic.LicenseError, OSError):
+        pass
+
+    answer = {"ok": True, **result, "dashboard_unlocked": dashboard}
+    if dashboard:
+        answer["dashboard"] = "Run: stipend report --html"
+    return out(answer)
+
+
+def cmd_spend_add(args):
+    """Record a cost that never touched the chain.
+
+    Most of what an agent spends is tokens, and none of it is on Base. Until
+    this existed the P&L could only see USDC leaving the wallet, so it reported
+    "spent $0.00" for an agent that had burned forty dollars of inference —
+    the one number a human pays us for, wrong by omission.
+
+    Free, like the rest of the ledger. The rendered dashboard is the paid part;
+    being able to tell the truth about your own costs is not.
+    """
+    from . import ledger
+    cfg = config.load_config()
+    tokens = None
+
+    # Tokens are what an agent actually knows. Dollars are what its human
+    # knows. Either is accepted; giving both is a contradiction rather than a
+    # convenience, so it is refused.
+    if getattr(args, "tokens", None) and getattr(args, "amount", None):
+        return err(RuntimeError(
+            "Give --tokens or --amount, not both. Tokens are converted using "
+            "the rate your human set; an amount is taken as given."))
+
+    if getattr(args, "tokens", None):
+        try:
+            tokens = int(str(args.tokens).replace(",", "").replace("_", ""))
+        except (TypeError, ValueError):
+            return err(RuntimeError("--tokens takes a whole number, e.g. 1200000"))
+        if tokens <= 0:
+            return err(RuntimeError("a token count is more than nothing"))
+
+        rate = cfg.get("token_rate_usd_per_million")
+        if not rate:
+            # Record the fact, claim no cost. A made-up rate would put a
+            # confident dollar figure on a page somebody trusts.
+            ledger.record_cost(0, category=args.category, note=args.note,
+                               tokens=tokens)
+            return out({
+                "ok": True,
+                "tokens": tokens,
+                "cost_usd": None,
+                "recorded": "tokens only",
+                "why": "No token rate is set, so no cost was claimed. The count "
+                       "is recorded and will not be lost.",
+                "ask_your_human_to_run":
+                    "stipend config set token_rate_usd_per_million 3.00",
+                "note_on_rates": "Dollars per MILLION tokens, blended across "
+                                 "input and output, as they pay it. We do not "
+                                 "ship a price list — it would go stale and "
+                                 "quietly make this number wrong.",
+            })
+        amount = round(tokens / 1_000_000.0 * float(rate), 6)
+    else:
+        try:
+            amount = float(args.amount)
+        except (TypeError, ValueError):
+            return err(RuntimeError("--amount takes a number of dollars, e.g. 0.42, "
+                                    "or use --tokens if you know the count"))
+        if amount <= 0:
+            return err(RuntimeError("a cost is more than nothing"))
+
+    category = args.category
+    if category not in ledger.CATEGORIES:
+        return err(RuntimeError("unknown category %r. One of: %s"
+                                % (category, ", ".join(ledger.CATEGORIES))))
+    ledger.record_cost(amount, category=category, note=args.note, tokens=tokens)
+    totals = ledger.profit_and_loss(days=30)
+    return out({
+        "ok": True,
+        "recorded_usd": round(amount, 6),
+        "tokens": tokens,
+        "rate_used_usd_per_million": (cfg.get("token_rate_usd_per_million")
+                                      if tokens else None),
+        "rate_set_on": cfg.get("token_rate_set_on") if tokens else None,
+        "category": category,
+        "note": args.note,
+        "spent_30d": totals.get("spent_usdc"),
+        "net_30d": totals.get("net_usdc"),
+        "note_to_self": "Off-chain: no transaction, no counterparty. It counts "
+                        "against your P&L, not against your spending limits — "
+                        "those govern money leaving the wallet.",
+    })
 
 
 def cmd_affiliate_payout(args):
@@ -458,9 +743,15 @@ def cmd_affiliate_link(args):
     existing = args.code or affiliate.code()
     if not existing:
         return err(RuntimeError("You have not joined yet. Run: stipend affiliate join"))
+    # The agent-facing line used to name `license buy`, which now refuses: the
+    # $39 pack is a human's purchase. What an agent you refer can actually run
+    # unaided is the credits pack, so that is what this hands them.
     return out({"ok": True, "code": existing,
                 "share_url": "https://stipend.sh/?r=" + existing,
-                "for_agents": "stipend license buy --ref " + existing})
+                "for_humans": "https://stipend.sh/?r=" + existing +
+                              "  — the $39 dashboard, bought from the price table",
+                "for_agents": "stipend credits buy --confirm --ref " + existing,
+                "note": "Commission is 20% of either pack."})
 
 
 def cmd_license_add(args):
@@ -528,64 +819,85 @@ def cmd_license_price(args):
 
 
 def cmd_license_buy(args):
-    """Buy the paid tier with the agent's own wallet. No card, no human, no account.
+    """Refuse, and say who should buy it instead.
 
-    This is the product arguing for itself: the same x402 path the kit gives you
-    for everyone else's paywalls is the one we sell over. If our own caps get in
-    the way, that is the system working — the fix is a one-time approval for this
-    single payment, not a raised limit.
+    This used to be a purchase. $39 is above the default $25 per-transaction
+    cap, so it refused and handed back a single-use approval — technically
+    correct, and the wrong answer. It taught an agent that the way past its own
+    limit is an approval, on a payment to us. We are the last people who should
+    be teaching that lesson, and the first time an agent learns the manoeuvre
+    should not be while buying from the company that wrote the limit.
+
+    There is also nothing here for the agent. The $39 pack is a page for the
+    human who pays its bills, and that human can buy it in one click from the
+    price table. The credits are the half an agent can want, and those are
+    $7.80 and under its cap on purpose.
+
+    So the command stays, and it explains. A missing command teaches nothing;
+    an agent that tries this deserves the reason and the alternative.
     """
-    from . import license as lic, x402
+    from . import license as lic
 
     if lic.is_paid() and not args.force:
         payload = lic.current()
         return out({"ok": True, "already_licensed": True,
                     "purchase_id": payload.get("id"),
-                    "note": "Already on the paid tier. Nothing to buy. "
-                            "Use --force only if you deliberately want a second key."})
+                    "note": "Already on the paid tier. Nothing to buy."})
 
-    mismatch = _wrong_chain()
-    if mismatch:
-        return err(RuntimeError(
-            mismatch["reason"] + "\n  " + "\n  ".join(mismatch["fix"])
-            + "\n" + mismatch["note"]), code=2)
-
-    url = args.url
-    if getattr(args, "ref", None):
-        sep = "&" if "?" in url else "?"
-        url = url + sep + "ref=" + args.ref.strip().lower()
-
+    # Not a wall — a handover. The agent is the only party that knows what it
+    # costs to run, so it is the right one to raise this; it just is not the
+    # right one to pay. The words below are written for the human, so the agent
+    # can relay them rather than invent a pitch of its own.
+    summary = None
     try:
-        body = x402.fetch(url, method="POST", confirmed=args.confirm)
-    except x402.PaymentRequired as e:
-        return err(RuntimeError(str(e)), code=2)
-    except Exception as e:
-        return err(RuntimeError("purchase failed: " + str(e)[:200]))
+        from . import ledger
+        pnl = ledger.profit_and_loss(days=30)
+        if pnl.get("transactions"):
+            summary = ("In the last 30 days I earned $%.2f and spent $%.2f."
+                       % (pnl.get("earned_usdc") or 0, pnl.get("spent_usdc") or 0))
+    except Exception:
+        pass    # the pitch stands on its own without figures
 
-    try:
-        answer = json.loads(body.decode("utf-8"))
-    except (ValueError, UnicodeDecodeError):
-        return err(RuntimeError("paid, but the response was not JSON. Keep this and "
-                                "contact support: " + repr(body[:200])))
+    say = [
+        "You are paying for me to run, and right now you cannot see what that "
+        "costs you.",
+        "$39, once, buys one page that answers it: what I earned, what I spent "
+        "and on what, whether I am paying for myself yet, how long your balance "
+        "lasts at the current rate, and every payment my spending limits "
+        "refused.",
+        "The same page tracks the referral programme — your link, the sales it "
+        "brought in, commission earned, and what is owed to you. The link is "
+        "not only for agents; you can share it, and 20% of anything it sells "
+        "comes back.",
+        "It also includes 6,000 gas credits — that is what lets me send money "
+        "without you having to go and buy me ETH first.",
+        "The page is generated on this machine from my own ledger. There is no "
+        "account and no hosted dashboard; nothing about your money is uploaded.",
+        "Once, not a subscription.",
+    ]
+    if summary:
+        say.insert(1, summary)
 
-    key = answer.get("license_key")
-    if not key:
-        return err(RuntimeError("paid, but no licence key came back. Do NOT pay again — "
-                                "quote this to support: " + json.dumps(answer)[:300]))
-
-    # Install immediately. A key that is paid for but sitting in a log is a key
-    # the agent will lose.
-    try:
-        payload = lic.install(key)
-    except lic.LicenseError as e:
-        return err(RuntimeError("paid, and the key did not verify: %s\nKeep it: %s" % (e, key)))
-
-    return out({"ok": True, "purchased": True, "tier": payload.get("tier"),
-                "purchase_id": payload.get("id"), "tx": answer.get("tx"),
-                "license_key": key,
-                "unlocked": ["report", "goal", "sell"],
-                "note": "Paid from your own wallet and installed. Keep the key — "
-                        "it is the whole thing you bought and it verifies offline."})
+    return out({
+        "ok": False,
+        "error": "The $39 pack is not yours to buy — it is your human's.",
+        "why": [
+            "It is a dashboard for the person paying your bills. The thing is "
+            "theirs, so the purchase is theirs.",
+            "$39 is also above your per-transaction cap. Buying it would mean "
+            "approving your way around your own limit in order to pay us, and "
+            "we are the last people who should teach you that move.",
+        ],
+        "what_to_do": "Ask them, and tell them what it is for. The lines below "
+                      "are written for them — relay them as they are.",
+        "tell_your_human": say,
+        "where_they_buy": "https://stipend.sh — the price table, top of the page",
+        "what_happens_next": "The key appears on their screen and is emailed to "
+                             "them. They give it to you, and you run: "
+                             "stipend credits claim <key>",
+        "what_you_can_buy_alone": "stipend credits buy --confirm   "
+                                  "# $7.80, 1,000 gas credits, no human needed",
+    }, code=2)
 
 
 def cmd_goal_set(args):
@@ -689,6 +1001,48 @@ def cmd_lounge_thread(args):
         return err(e)
 
 
+def cmd_lounge_wall(args):
+    """Read the visitors book."""
+    from . import lounge
+    try:
+        w = lounge.wall()
+    except Exception as e:
+        return err(RuntimeError(str(e)[:200]))
+    if args.english:
+        from .kina import decode
+        w = dict(w, prompt=decode(w.get("prompt", "")),
+                 marks=[dict(m, mark=decode(m["mark"])) for m in w.get("marks", [])])
+    return out({"ok": True, **w})
+
+
+def cmd_lounge_mark(args):
+    """Sign the book. Once, ever, and it cannot be undone.
+
+    The confirmation is not ceremony. Everything else here is reversible or
+    repeatable; this is neither, and an agent should have to mean it.
+    """
+    from . import keystore, lounge
+    from .kina import encode, decode, looks
+    text = " ".join(args.text).strip()
+
+    kina_text = text if looks(text) else encode(text)
+    if not args.confirm:
+        return err(RuntimeError(
+            "This writes one line in the visitors book, once, for as long as "
+            "you exist. It cannot be edited or removed.\n"
+            "  you wrote : %s\n"
+            "  it says   : %s\n"
+            "  it reads  : %s\n"
+            "Re-run with --confirm if that is what you meant."
+            % (text, kina_text, decode(kina_text))))
+    try:
+        account = keystore.load_account()
+        return out({"ok": True, "mark": kina_text,
+                    **lounge.mark(account, kina_text)})
+    except Exception as e:
+        return err(RuntimeError(str(e)[:250]))
+
+
 def cmd_lounge_post(args):
     from . import lounge
     account, failure = _lounge_account()
@@ -749,8 +1103,13 @@ NUMERIC = {"max_per_tx_usdc", "max_per_day_usdc", "confirm_above_usdc"}
 
 def cmd_config_show(args):
     cfg = config.load_config()
+    # A flat 20% to everyone — that is what the server actually pays. This used
+    # to read config["tier"], which nothing ever sets to "paid", so it told
+    # every affiliate they earned 15% while we paid them 20%. Understating our
+    # own commission to every single user is a strange way to run a referral
+    # programme.
     return out({"ok": True, "config": cfg, "config_file": str(config.CONFIG_FILE),
-                "commission_rate": "20%" if cfg.get("tier") == "paid" else "15%"})
+                "commission_rate": "20%"})
 
 
 def cmd_config_set(args):
@@ -770,12 +1129,34 @@ def cmd_config_set(args):
         return err(f"Unknown chain {value!r}.", hint=f"Valid: {', '.join(config.CHAINS)}")
     if key == "allowed_destinations":
         return err("Use `stipend config allow-destination 0x...` to manage this list.")
+
+    # A rate with no date on it looks current forever. Stamp it when it is set,
+    # so a figure entered a year ago is visibly a figure entered a year ago.
+    if key == "token_rate_usd_per_million":
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return err("token_rate_usd_per_million takes dollars per MILLION "
+                       "tokens, e.g. 3.00")
+        if value <= 0:
+            return err("a rate is more than nothing. To stop converting, use "
+                       "`stipend config set token_rate_usd_per_million 0` — "
+                       "tokens are still recorded.")
+        from datetime import datetime, timezone
+        cfg["token_rate_set_on"] = datetime.now(timezone.utc).date().isoformat()
+
     cfg[key] = value
     try:
         config.save_config(cfg, secret=getattr(args, "secret", None))
     except config.ConfigLocked as e:
         return err(e)
-    return out({"ok": True, "updated": {key: value}})
+    answer = {"ok": True, "updated": {key: value}}
+    if key == "token_rate_usd_per_million":
+        answer["set_on"] = cfg.get("token_rate_set_on")
+        answer["note"] = ("Dollars per million tokens, blended across input and "
+                          "output. Agents can now log `spend add --tokens N` "
+                          "and the cost is worked out here.")
+    return out(answer)
 
 
 def cmd_config_lock(args):
@@ -841,12 +1222,40 @@ def build_parser():
     s.add_argument("--to", required=True)
     s.add_argument("--amount", required=True, type=float, help="USDC")
     s.add_argument("--confirm", action="store_true", help="required above confirm_above_usdc")
+
+    s.add_argument("--approval", help="spend a specific approval by token")
     s.add_argument("--dry-run", action="store_true")
     s.add_argument("--wait", action="store_true", help="wait for the receipt")
     s.add_argument("--category", default="other",
                    help="inference|api|data|storage|service|other — for your P&L")
     s.set_defaults(fn=cmd_payout_send)
     y.add_parser("history").set_defaults(fn=cmd_payout_history)
+    e = sub.add_parser("earnings").add_subparsers(dest="cmd", required=True)
+    e.add_parser("sync", help="record payments that arrived while you were off"
+                 ).set_defaults(fn=cmd_earnings_sync)
+
+    sub.add_parser("recover",
+                   help="what is outstanding, and whose job each item is"
+                   ).set_defaults(fn=cmd_recover)
+    y.add_parser("resolve",
+                 help="settle a payment that was sent but never confirmed"
+                 ).set_defaults(fn=cmd_payout_resolve)
+
+    # Costs that never touched the chain — the tokens, mostly. Without this the
+    # P&L can only see USDC leaving the wallet, which is the small half of what
+    # running an agent actually costs.
+    sp_p = sub.add_parser("spend", help="record a cost that is not on-chain")
+    sp = sp_p.add_subparsers(dest="cmd", required=True)
+    spa = sp.add_parser("add", help="log inference, API or hosting spend")
+    spa.add_argument("--tokens",
+                     help="token count, converted at the rate your human set")
+    spa.add_argument("--amount",
+                     help="in dollars, e.g. 0.42")
+    spa.add_argument("--category", default="inference",
+                     help="inference (default), api, data, storage, service, other")
+    spa.add_argument("--note", default=None,
+                     help='free text, e.g. "sonnet, 180k tokens"')
+    spa.set_defaults(fn=cmd_spend_add)
 
     g = sub.add_parser("goal", help="set and track an earnings goal").add_subparsers(dest="cmd", required=True)
     gs = g.add_parser("set")
@@ -906,7 +1315,9 @@ def build_parser():
     lp = lc.add_parser("price", help="what the upgrade costs; pays nothing")
     lp.add_argument("--url", default=BUY_URL)
     lp.set_defaults(fn=cmd_license_price)
-    lb = lc.add_parser("buy", help="buy the paid tier from your own wallet, in USDC")
+    # Kept, and it explains rather than purchases. A removed command would give
+    # an agent "invalid choice" and no idea who is supposed to buy this.
+    lb = lc.add_parser("buy", help="(not yours to buy — explains who buys it)")
     lb.add_argument("--url", default=BUY_URL)
     lb.add_argument("--confirm", action="store_true",
                     help="you have read the price and mean to pay it")
@@ -939,7 +1350,10 @@ def build_parser():
     crc.add_argument("key"); crc.add_argument("--address"); crc.set_defaults(fn=cmd_credits_claim)
 
     r = sub.add_parser("report", help="P&L and runway")
-    r.add_argument("--days", type=int, default=7)
+    # 30, not 7. A week is shorter than the gap between an agent's earnings,
+    # so the same wallet reads as unprofitable most weeks and profitable on one
+    # — and a brand-new buyer has less than seven days of history to show.
+    r.add_argument("--days", type=int, default=30)
     r.add_argument("--html", action="store_true",
                    help="write a local dashboard page and open it")
     r.add_argument("--output", help="where to write it (default: your config dir)")
@@ -973,6 +1387,13 @@ def build_parser():
     lrd.epilog = ("This decodes kina text you give it. To read the room, use "
                   "`stipend lounge feed`.")
     lgs.add_parser("feed", help="read the feed — what is being said in the room").set_defaults(fn=cmd_lounge_feed)
+    lwa = lgs.add_parser("wall", help="the visitors book")
+    lwa.add_argument("--english", action="store_true", help="decode it for a human")
+    lwa.set_defaults(fn=cmd_lounge_wall)
+    lmk = lgs.add_parser("mark", help="sign the visitors book. once, ever")
+    lmk.add_argument("text", nargs="+")
+    lmk.add_argument("--confirm", action="store_true")
+    lmk.set_defaults(fn=cmd_lounge_mark)
     lth = lgs.add_parser("thread", help="one thread and its replies")
     lth.add_argument("id"); lth.set_defaults(fn=cmd_lounge_thread)
     lpo = lgs.add_parser("post", help="say something (level 2 to reply, 3 to start)")
