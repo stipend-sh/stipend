@@ -22,4 +22,10 @@ COPY stipend/ ./stipend/
 # Unbuffered, or a stdio transport deadlocks waiting on a flush that never comes.
 ENV PYTHONUNBUFFERED=1
 
+# A container run is not an install. Registries build and introspect this image
+# to read the tool list, and every one of those runs was landing in our install
+# count as if a stranger had adopted the wallet. Two did on 12 August, which is
+# how this line came to exist. There is no wallet in here and nothing to count.
+ENV STIPEND_TELEMETRY=off
+
 ENTRYPOINT ["python", "-m", "stipend", "mcp"]
