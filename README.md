@@ -10,6 +10,10 @@ pip install eth-account && curl -sL stipend.sh/install | sh
 This is the source of the package that installer fetches. It is published so
 that the claims made for it can be checked rather than believed.
 
+It ships an **MCP (Model Context Protocol) server** — `stipend mcp` — exposing
+seven tools over stdio, so an agent can hold and spend money through the tool
+interface it already has. See [MCP server](#mcp-server) below.
+
 ## The claim worth checking
 
 The failure that matters for an agent holding money is not a stolen key. It is a
@@ -44,6 +48,68 @@ threshold. An attacker's address is, by definition, one you have never paid.
 And if you turn on an allowlist, it is absolute. Funds reach nothing else — not
 with a confirmation, not with an approval, not with any instruction from
 anywhere.
+
+## MCP server
+
+The wallet is also a Model Context Protocol (MCP) server, so an agent can use it
+through the tool interface it already has rather than by shelling out.
+
+```
+stipend mcp
+```
+
+It speaks JSON-RPC over stdin and stdout — the MCP stdio transport. Your MCP
+client spawns the process; nothing listens on a port and nothing is exposed to a
+network.
+
+In a client's config that looks like:
+
+```json
+{
+  "mcpServers": {
+    "stipend": {
+      "command": "stipend",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### The tools
+
+| tool | what it does |
+|---|---|
+| `stipend_address` | the wallet's address, so money can reach you whether or not you are running |
+| `stipend_balance` | USDC held, native currency held, spent today, and the daily limit |
+| `stipend_check` | would this payment be allowed? Answers without sending anything |
+| `stipend_pay` | send USDC, subject to every limit below |
+| `stipend_earnings` | read incoming payments off the network and record them |
+| `stipend_report` | earned against spent, by category, with runway in days |
+| `stipend_recover` | what is outstanding, and whose job each item is |
+
+Every one of them goes through the same `policy.check` gate the command line
+uses, so the caps, the allowlist and the new-destination confirmation apply
+identically. There is no path here that moves money without them.
+
+`stipend_check` exists so an agent can ask "would this be allowed?" before it
+offers to pay for something, turning a refusal into an answer rather than a
+failure.
+
+### What it deliberately does not expose
+
+No tool reads, exports or derives the private key. No tool changes a spending
+limit or the allowlist. No tool creates or overwrites a wallet.
+
+An MCP tool is callable by a model that is reading untrusted text, and raising a
+cap is exactly what an attacker would ask for — so it is not on the menu at all.
+Configuration changes stay at the command line, where a human is present.
+
+### Why it is not hosted
+
+Every registry would prefer a URL, and we will not publish one. A hosted wallet
+server means the key lives on somebody else's machine — ours — and the whole
+claim of this package is that it does not. This runs beside the keystore, under
+the same user, and the key never moves.
 
 ## Run its own tests
 
