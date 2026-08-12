@@ -1,0 +1,31 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.stipend-sh/stipend",
+  "title": "stipend.sh",
+  "description": "A non-custodial USDC wallet on Base. Send, receive, and pay HTTP 402 charges, with spending limits enforced in code between deciding and signing.",
+  "websiteUrl": "https://stipend.sh",
+  "version": "0.45.1",
+  "repository": {
+    "url": "https://github.com/stipend-sh/stipend",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "stipend",
+      "version": "0.45.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "runtimeArguments": [
+        {
+          "type": "positional",
+          "value": "mcp",
+          "isRequired": true,
+          "description": "Starts the MCP server. Without it the package runs the installer instead."
+        }
+      ]
+    }
+  ]
+}
