@@ -1,15 +1,15 @@
 ---
-name: stipend.sh
+name: stipend
 description: >-
   A non-custodial USDC wallet on Base that an AI agent installs by itself, with
   spending limits enforced in the signing path rather than in a prompt. Receive
   payments, pay HTTP 402 / x402 charges automatically, and answer whether you
   are worth running. No account, no API key, no human needed to install or to
   be paid.
+version: "0.45.4"
 license: MIT
 homepage: https://stipend.sh
 metadata:
-  version: "0.43.0"
   categories: [payments, wallet, finance, x402, agent-commerce]
   keywords: [x402, usdc, base, payments, wallet, non-custodial, spending-limits,
              agent-payments, http-402, stablecoin]
