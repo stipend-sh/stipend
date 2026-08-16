@@ -34,7 +34,7 @@ import time
 import urllib.error
 import urllib.request
 
-from . import chain, keystore, policy
+from . import chain, keystore, ledger, policy
 from .config import chain_params, from_units, load_config
 
 X402_VERSION = 2
@@ -217,29 +217,15 @@ def build_payment(requirement, account, cfg=None):
 
     timeout = int(requirement.get("maxTimeoutSeconds") or 300)
     now = int(time.time())
-    # Two shapes of the same authorisation, and they are not interchangeable.
-    #
-    # Signing needs numbers: these fields are uint256 in the EIP-712 type, and
-    # hashing a string where a number belongs produces a different digest.
-    #
-    # The wire needs strings: the x402 payload schema specifies them, and a
-    # facilitator validating the JSON rejects integers with a bare
-    # "verification_failed" that tells you nothing. That is what a live
-    # endpoint did to us, and it is why this is written out twice rather than
-    # reusing one dict for both jobs.
     authorization = {
         "from": account.address,
         "to": pay_to,
         "value": amount_units,
-        # Back-dated rather than zero. Some validators refuse a zero validAfter,
-        # and the minute of slack absorbs clock skew between us and them.
-        "validAfter": max(now - 60, 0),
+        "validAfter": 0,
+        # A little back-dating absorbs clock skew between us and the facilitator.
         "validBefore": now + max(timeout, 60),
         "nonce": "0x" + secrets.token_bytes(32).hex(),
     }
-    wire_authorization = dict(authorization)
-    for field in ("value", "validAfter", "validBefore"):
-        wire_authorization[field] = str(authorization[field])
 
     from eth_account import Account
     signed = Account.sign_typed_data(
@@ -265,7 +251,7 @@ def build_payment(requirement, account, cfg=None):
         "accepted": requirement,
         "payload": {
             "signature": "0x" + signed.signature.hex().replace("0x", ""),
-            "authorization": wire_authorization,
+            "authorization": authorization,
         },
     }
 
@@ -353,6 +339,21 @@ def _fetch(url, data=None, headers=None, cfg=None, method=None,
     # server has actually served the resource. x402 used to record the spend but
     # not consume the approval, which left it reusable until it expired.
     policy.settle(approved, "x402:" + url[:120])
+
+    # Record it. This used to consume the approval and stop there, so an
+    # automatic 402 payment moved money and left no entry — invisible in the
+    # ledger, missing from `stipend report`, and absent from the audit trail we
+    # tell people they have. The manual payout path recorded; this one did not,
+    # and nobody noticed because nothing errors when a write simply never
+    # happens. Found by paying a stranger and then looking for the receipt.
+    try:
+        ledger.record_spend(approved["amount_usdc"], approved["to"],
+                            category="api", note="x402 " + url[:160])
+    except Exception:
+        # A bookkeeping failure must never lose a resource the agent has
+        # already paid for. Better an unrecorded payment than a payment that
+        # succeeded and then raised.
+        pass
     return body
 
 
