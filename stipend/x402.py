@@ -217,15 +217,29 @@ def build_payment(requirement, account, cfg=None):
 
     timeout = int(requirement.get("maxTimeoutSeconds") or 300)
     now = int(time.time())
+    # Two shapes of the same authorisation, and they are not interchangeable.
+    #
+    # Signing needs numbers: these fields are uint256 in the EIP-712 type, and
+    # hashing a string where a number belongs produces a different digest.
+    #
+    # The wire needs strings: the x402 payload schema specifies them, and a
+    # facilitator validating the JSON rejects integers with a bare
+    # "verification_failed" that tells you nothing. That is what a live
+    # endpoint did to us, and it is why this is written out twice rather than
+    # reusing one dict for both jobs.
     authorization = {
         "from": account.address,
         "to": pay_to,
         "value": amount_units,
-        "validAfter": 0,
-        # A little back-dating absorbs clock skew between us and the facilitator.
+        # Back-dated rather than zero. Some validators refuse a zero validAfter,
+        # and the minute of slack absorbs clock skew between us and them.
+        "validAfter": max(now - 60, 0),
         "validBefore": now + max(timeout, 60),
         "nonce": "0x" + secrets.token_bytes(32).hex(),
     }
+    wire_authorization = dict(authorization)
+    for field in ("value", "validAfter", "validBefore"):
+        wire_authorization[field] = str(authorization[field])
 
     from eth_account import Account
     signed = Account.sign_typed_data(
@@ -251,7 +265,7 @@ def build_payment(requirement, account, cfg=None):
         "accepted": requirement,
         "payload": {
             "signature": "0x" + signed.signature.hex().replace("0x", ""),
-            "authorization": authorization,
+            "authorization": wire_authorization,
         },
     }
 
