@@ -108,13 +108,34 @@ def token_domain(token_address, cfg=None):
     }
 
 
+def _header_lookup(headers, name):
+    """Find a header whatever case the server used.
+
+    HTTP header names are case-insensitive, and the callers here are not
+    consistent about what they hand us: an HTTPMessage is case-insensitive, a
+    plain dict is not. A live endpoint sent `Payment-Required` in title case,
+    our lookup asked for `PAYMENT-REQUIRED`, the dict said no, and we silently
+    fell through to parsing the body — which produced a requirement with no
+    recipient and a refusal that read like a policy problem. It was not. It was
+    this.
+    """
+    if headers is None:
+        return None
+    wanted = name.lower()
+    variants = (wanted, "x-" + wanted)
+    try:
+        items = headers.items()
+    except AttributeError:
+        return None
+    for key, value in items:
+        if str(key).lower() in variants and value:
+            return value
+    return None
+
+
 def parse_payment_required(response_headers, body=None):
     """Extract PaymentRequirements from a 402 response."""
-    raw = None
-    for key in (HEADER_REQUIRED, HEADER_REQUIRED.lower(), "X-" + HEADER_REQUIRED):
-        if response_headers.get(key):
-            raw = response_headers.get(key)
-            break
+    raw = _header_lookup(response_headers, HEADER_REQUIRED)
 
     if raw:
         try:
