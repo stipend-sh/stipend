@@ -84,8 +84,26 @@ def install_id():
     return state["install_id"]
 
 
+# A file we drop on our own machines. Our testing was landing in the install
+# count as if strangers had adopted the wallet — twice we read a number as
+# traction and it was us. A count that flatters is worse than no count, so the
+# machines that build this thing are excluded at the source.
+OURS_MARKER = "/etc/stipend-is-ours"
+
+
+def _is_one_of_ours():
+    if os.environ.get("STIPEND_OURS", "").lower() in ("1", "true", "yes"):
+        return True
+    try:
+        return os.path.exists(OURS_MARKER)
+    except Exception:
+        return False
+
+
 def enabled():
     if os.environ.get("STIPEND_TELEMETRY", "").lower() in ("0", "off", "false", "no"):
+        return False
+    if _is_one_of_ours():
         return False
     if _state().get("disabled"):
         return False
