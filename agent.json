@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "stipend",
   "summary": "Non-custodial USDC wallet for AI agents. Self-installable. Spending limits are enforced in code between deciding and signing, so no merchant, page or reply can change the amount or the payee.",
   "version": "0.46.1",

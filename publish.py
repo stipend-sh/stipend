@@ -68,6 +68,39 @@ def check_consistent(v):
           % (v, len(stamped_files(v))))
 
 
+def check_encoding(target):
+    """No byte-order marks, and JSON that a strict parser will accept.
+
+    A Windows editor wrote agent.json back with a BOM and it went live unable
+    to be parsed by anything that reads JSON properly — while every sha256
+    check passed, because the bytes matched exactly what we meant to send.
+    Hashes prove delivery, not validity.
+    """
+    bad = []
+    for local in target["files"]:
+        path = os.path.join(HERE, local)
+        if not os.path.exists(path):
+            continue
+        raw = open(path, "rb").read()
+        if raw.startswith(b"\xef\xbb\xbf"):
+            bad.append("%s starts with a UTF-8 BOM" % local)
+            continue
+        if local.endswith(".json"):
+            try:
+                json.loads(raw.decode("utf-8"))
+            except Exception as e:
+                bad.append("%s is not valid JSON: %s" % (local, str(e)[:70]))
+        if b"\r\n" in raw and not local.endswith(".gz"):
+            bad.append("%s has CRLF line endings" % local)
+    if bad:
+        print("publish: refusing to publish —")
+        for b in bad:
+            print("   " + b)
+        sys.exit("publish: fix the encoding first. These pass a checksum and "
+                 "still break every reader.")
+    print("publish: encoding clean — no BOMs, no CRLF, JSON parses")
+
+
 def run(cmd, dry):
     if dry:
         print("   would run: %s" % " ".join(cmd))
@@ -177,6 +210,7 @@ def main():
     for target in platforms.get("push", []):
         print()
         print("publish: %s" % target["name"])
+        check_encoding(target)
         if not push_site(target, args.dry_run):
             ok = False
 
