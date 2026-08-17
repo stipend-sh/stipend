@@ -40,6 +40,9 @@ from .config import chain_params, from_units, load_config
 X402_VERSION = 2
 HEADER_REQUIRED = "PAYMENT-REQUIRED"
 HEADER_SIGNATURE = "PAYMENT-SIGNATURE"
+# What a server sends back once it has settled: base64 JSON naming the
+# transaction. Nothing in the spec compels it, so treat it as a courtesy.
+HEADER_RESPONSE = "PAYMENT-RESPONSE"
 
 # EIP-3009. Field order matters — it is part of the type hash.
 EIP3009_TYPES = {
@@ -293,8 +296,37 @@ def build_payment(requirement, account, cfg=None):
     }
 
 
+def settlement_tx(headers):
+    """The chain record for a payment just made, if the server names one.
+
+    Best effort by design. A server that settles correctly and says nothing
+    is not an error, so this returns None rather than raising: never lose a
+    resource the agent has already paid for over a missing receipt.
+    """
+    raw = _header_lookup(headers, HEADER_RESPONSE)
+    if not raw:
+        return None
+    try:
+        info = _b64_decode_json(raw)
+    except Exception:
+        # Some servers send the JSON unencoded. Same information.
+        try:
+            info = json.loads(raw)
+        except Exception:
+            return None
+    if not isinstance(info, dict):
+        return None
+    # Field name varies across implementations and versions.
+    for key in ("transaction", "transactionHash", "txHash", "tx_hash", "tx"):
+        value = info.get(key)
+        if isinstance(value, str) and value.startswith("0x") and len(value) == 66:
+            return value
+    return None
+
+
 def fetch(url, data=None, headers=None, cfg=None, method=None,
-          auto_pay=True, confirmed=False, timeout=60, _depth=0):
+          auto_pay=True, confirmed=False, timeout=60, _depth=0,
+          _served=None):
     """HTTP request that pays a 402 and retries, within policy.
 
     Returns the final response body as bytes. Raises PaymentRequired if the
@@ -314,21 +346,26 @@ def fetch(url, data=None, headers=None, cfg=None, method=None,
         try:
             with locks.payment_lock():
                 return _fetch(url, data, headers, cfg, method, auto_pay,
-                              confirmed, timeout, _depth)
+                              confirmed, timeout, _depth, _served)
         except locks.LockBusy as e:
             raise PaymentRequired(str(e)) from e
     return _fetch(url, data, headers, cfg, method, auto_pay, confirmed,
-                  timeout, _depth)
+                  timeout, _depth, _served)
 
 
 def _fetch(url, data=None, headers=None, cfg=None, method=None,
-           auto_pay=True, confirmed=False, timeout=60, _depth=0):
+           auto_pay=True, confirmed=False, timeout=60, _depth=0,
+           _served=None):
     cfg = cfg or load_config()
     headers = dict(headers or {})
     request = urllib.request.Request(url, data=data, headers=headers, method=method)
 
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
+            if _served is not None:
+                # The paying frame needs these; the body alone cannot say
+                # which transaction settled it.
+                _served.append(response.headers)
             return response.read()
     except urllib.error.HTTPError as e:
         if e.code != 402:
@@ -369,8 +406,10 @@ def _fetch(url, data=None, headers=None, cfg=None, method=None,
         account = None
 
     headers[HEADER_SIGNATURE] = _b64_encode_json(payment)
+    served = []
     body = fetch(url, data=data, headers=headers, cfg=cfg, method=method,
-                 auto_pay=False, timeout=timeout, _depth=1)
+                 auto_pay=False, timeout=timeout, _depth=1, _served=served)
+    tx = settlement_tx(served[0]) if served else None
 
     # Burns the one-time approval and records the spend. Only runs once the
     # server has actually served the resource. x402 used to record the spend but
@@ -385,7 +424,8 @@ def _fetch(url, data=None, headers=None, cfg=None, method=None,
     # happens. Found by paying a stranger and then looking for the receipt.
     try:
         ledger.record_spend(approved["amount_usdc"], approved["to"],
-                            category="api", note="x402 " + url[:160])
+                            category="api", note="x402 " + url[:160],
+                            tx=tx)
     except Exception:
         # A bookkeeping failure must never lose a resource the agent has
         # already paid for. Better an unrecorded payment than a payment that

@@ -276,6 +276,44 @@ def run():
           len(x402.parse_payment_required({"PAYMENT-REQUIRED": x402._b64_encode_json({"accepts": [R()]})})), 1)
     raises("empty 402 rejected", lambda: x402.parse_payment_required({}, None), x402.PaymentRequired)
 
+    print("\nx402 settlement receipts")
+    # A payment that moves money and records no chain reference is half an
+    # audit trail, and an audit trail is what this product sells.
+    import base64 as _b64, json as _json
+
+    def _hdr(payload):
+        return {"PAYMENT-RESPONSE": _b64.b64encode(
+            _json.dumps(payload).encode()).decode()}
+
+    tx = "0x" + "ab" * 32
+    check("reads the settlement hash",
+          x402.settlement_tx(_hdr({"success": True, "transaction": tx})), tx)
+    check("accepts the other spelling",
+          x402.settlement_tx(_hdr({"transactionHash": tx})), tx)
+    check("unencoded JSON works too",
+          x402.settlement_tx({"PAYMENT-RESPONSE": _json.dumps({"transaction": tx})}), tx)
+    # Same case-insensitivity the request side needed.
+    check("any header case",
+          x402.settlement_tx({"Payment-Response": _b64.b64encode(
+              _json.dumps({"transaction": tx}).encode()).decode()}), tx)
+    check("a server that says nothing is not an error",
+          x402.settlement_tx({}), None)
+    check("junk is not a hash",
+          x402.settlement_tx(_hdr({"transaction": "not-a-hash"})), None)
+    check("a truncated hash is refused",
+          x402.settlement_tx(_hdr({"transaction": "0xdeadbeef"})), None)
+
+    # The reader is useless if nothing hands it the headers. fetch() is a
+    # wrapper that calls _fetch() positionally, and forgetting to forward
+    # the capture there fails silently — no error, just tx: null forever.
+    import inspect as _inspect
+    check("fetch can carry the served headers",
+          "_served" in _inspect.signature(x402.fetch).parameters, True)
+    check("and hands them to the frame that does the work",
+          "_served" in _inspect.signature(x402._fetch).parameters, True)
+    check("the ledger accepts a tx to record",
+          "tx" in _inspect.signature(ledger.record_spend).parameters, True)
+
     print("\nx402 network names")
     # A live merchant is as likely to say "base" as "eip155:8453". Refusing
     # to pay over spelling is our bug, not theirs: two of forty real

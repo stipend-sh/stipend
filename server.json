@@ -4,7 +4,7 @@
   "title": "stipend.sh",
   "description": "A non-custodial USDC wallet on Base. Send, receive, and pay HTTP 402 charges, with spending limits enforced in code between deciding and signing.",
   "websiteUrl": "https://stipend.sh",
-  "version": "0.46.0",
+  "version": "0.46.1",
   "repository": {
     "url": "https://github.com/stipend-sh/stipend",
     "source": "github"
@@ -14,7 +14,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "stipend",
-      "version": "0.46.0",
+      "version": "0.46.1",
       "transport": {
         "type": "stdio"
       },
