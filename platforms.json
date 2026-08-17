@@ -1,0 +1,95 @@
+{
+  "_comment": [
+    "Every place stipend.sh is published, and how each one is updated.",
+    "Seeded from the lister's submission ledger on 17 August 2026.",
+    "",
+    "'push' is what publish.py can do unattended. 'manual' needs a human in a",
+    "browser or a passkey. 'static' means the listing carries no version or",
+    "changing content, so a release does not make it stale - most awesome-list",
+    "entries are a name, a line of description and a URL, and re-opening forty",
+    "pull requests for a patch bump would be spam.",
+    "",
+    "Anything listed here as 'stale_on_release' is what a release must reach."
+  ],
+
+  "push": [
+    {
+      "name": "stipend.sh (our own site)",
+      "why_it_matters": "install.py and every directory's docs link point here",
+      "files": {
+        "SKILL.md": "/var/www/stipend.sh/skill.md",
+        "llms.txt": "/var/www/stipend.sh/llms.txt",
+        "agent.json": "/var/www/stipend.sh/agent.json",
+        "dist/stipend.tar.gz": "/var/www/stipend.sh/stipend.tar.gz"
+      },
+      "host": "root@43.229.62.98",
+      "verify": "https://stipend.sh/",
+      "stale_on_release": true
+    }
+  ],
+
+  "manual": [
+    {
+      "name": "npm",
+      "url": "https://www.npmjs.com/package/stipend",
+      "holds": "a shim that downloads install.py — no client code",
+      "stale_on_release": false,
+      "note": "Version number only. The shim always fetches the live tarball, so npm users get the new client without a republish. Bump for tidiness, not correctness.",
+      "how": "npm publish (Matt's passkey — he enters it himself)"
+    },
+    {
+      "name": "ClawHub",
+      "url": "https://clawhub.ai/skills/graphiker-australia/stipend",
+      "holds": "an uploaded folder including SKILL.md with a pinned version",
+      "stale_on_release": true,
+      "how": "browser upload; GitHub import never worked (could not see the org)"
+    },
+    {
+      "name": "Claw Mart",
+      "url": "https://www.shopclawmart.com/listings/stipend-ceecb59e",
+      "holds": "package v3, uploaded 14 Aug, plus the about text",
+      "stale_on_release": true,
+      "how": "browser, creator account. $29/month — review 13 Sep",
+      "note": "Their security scan rejects curl|sh. Keep install notes on npx."
+    },
+    {
+      "name": "Official MCP Registry",
+      "url": "https://registry.modelcontextprotocol.io",
+      "holds": "server.json, which names a version",
+      "stale_on_release": true,
+      "how": "mcp-publisher CLI, GitHub auth"
+    },
+    {
+      "name": "glama.ai",
+      "url": "https://glama.ai/mcp/servers/stipend-sh/stipend",
+      "holds": "reads glama.json and the README from the repo",
+      "stale_on_release": false,
+      "how": "re-scans the repo on its own schedule"
+    }
+  ],
+
+  "static": [
+    {
+      "name": "awesome-list pull requests",
+      "count_at_seed": 40,
+      "stale_on_release": false,
+      "note": "Each carries a name, one line and a URL. A version bump does not make them wrong. Re-open only if the description or the URL changes.",
+      "reopen_when": ["description changes", "URL changes", "project renamed"]
+    },
+    {
+      "name": "x402 and agent directories",
+      "examples": ["agent-tools.cloud", "a2alist.ai", "TOLL·402", "402directory.com",
+                   "x402-list.com", "agents.net", "claudemarket.ai", "switchtools.io",
+                   "skillsmd.dev", "mcp.directory", "mcpservers.org"],
+      "stale_on_release": false,
+      "note": "They index endpoints and descriptions, not client versions. agent-tools.cloud and 402directory.com publish no update route at all; x402-list.com has /services/{slug}/request-update once a listing is public.",
+      "reopen_when": ["a new endpoint ships", "pricing changes", "an endpoint is retired"]
+    },
+    {
+      "name": "llms.txt directories",
+      "examples": ["llmstxt.site", "directory.llmstxt.cloud"],
+      "stale_on_release": false,
+      "note": "They fetch https://stipend.sh/llms.txt live, so publishing the site is the update."
+    }
+  ]
+}
