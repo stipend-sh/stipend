@@ -1,3 +1,3 @@
-"""stipend — a non-custodial USDC wallet for AI agents."""
+﻿"""stipend â€” a non-custodial USDC wallet for AI agents."""
 
-__version__ = "0.45.1"
+__version__ = "0.46.0"
