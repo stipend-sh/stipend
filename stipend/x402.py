@@ -162,6 +162,31 @@ CHAIN_NAMES = {
     "eip155:84532": "Base Sepolia (testnet)",
 }
 
+# CAIP-2 is what the x402 schema asks for, but a good share of live servers
+# still name their chain the old way. Both mean the same chain, and refusing to
+# pay over spelling would be our bug, not theirs.
+NETWORK_ALIASES = {
+    "base": 8453,
+    "base-mainnet": 8453,
+    "base mainnet": 8453,
+    "base-sepolia": 84532,
+    "base sepolia": 84532,
+    "basesepolia": 84532,
+}
+
+
+def network_chain_id(network):
+    """The chain id a server means, or None if we do not recognise the name."""
+    name = (network or "").strip().lower()
+    if not name:
+        return None
+    if name.startswith("eip155:"):
+        try:
+            return int(name.split(":", 1)[1])
+        except ValueError:
+            return None
+    return NETWORK_ALIASES.get(name)
+
 
 def _network_mismatch(theirs, ours, params):
     """Say which chain, and what to type. Not two numbers to go and look up."""
@@ -190,13 +215,16 @@ def _select_requirement(options, cfg):
         asset = opt.get("asset") or opt.get("token") or ""
         if scheme and scheme != "exact":
             reasons.append(f"unsupported scheme {scheme!r}"); continue
-        if network and network != want_network:
-            # Almost always the same thing: a fresh install is on the testnet
-            # it ships with, and the thing it is trying to buy is real. Chain
-            # ids are not something to make an agent look up mid-purchase, so
-            # name the chains and give the exact command.
-            reasons.append(_network_mismatch(network, want_network, p))
-            continue
+        if network:
+            theirs = network_chain_id(network)
+            if theirs != int(p["chain_id"]):
+                # Almost always the same thing: a fresh install is on the
+                # testnet it ships with, and the thing it is trying to buy is
+                # real. Chain ids are not something to make an agent look up
+                # mid-purchase, so name the chains and give the exact command.
+                canonical = "eip155:%d" % theirs if theirs else network
+                reasons.append(_network_mismatch(canonical, want_network, p))
+                continue
         if asset and asset.lower() != p["usdc"].lower():
             reasons.append(f"asset {asset} is not the USDC we hold"); continue
         return opt
@@ -221,11 +249,20 @@ def build_payment(requirement, account, cfg=None):
         "from": account.address,
         "to": pay_to,
         "value": amount_units,
-        "validAfter": 0,
-        # A little back-dating absorbs clock skew between us and the facilitator.
+        # Back-dated rather than zero. Some validators refuse a zero validAfter,
+        # and a little back-dating absorbs clock skew between us and them.
+        "validAfter": max(now - 60, 0),
         "validBefore": now + max(timeout, 60),
         "nonce": "0x" + secrets.token_bytes(32).hex(),
     }
+
+    # Signed as numbers, sent as strings. EIP-712 hashes uint256 values, but the
+    # x402 schema types these three as strings and a facilitator that validates
+    # the payload before verifying the signature answers a bare
+    # "verification_failed" when it sees integers.
+    wire_authorization = dict(authorization)
+    for field in ("value", "validAfter", "validBefore"):
+        wire_authorization[field] = str(authorization[field])
 
     from eth_account import Account
     signed = Account.sign_typed_data(
@@ -251,7 +288,7 @@ def build_payment(requirement, account, cfg=None):
         "accepted": requirement,
         "payload": {
             "signature": "0x" + signed.signature.hex().replace("0x", ""),
-            "authorization": authorization,
+            "authorization": wire_authorization,
         },
     }
 

@@ -276,6 +276,19 @@ def run():
           len(x402.parse_payment_required({"PAYMENT-REQUIRED": x402._b64_encode_json({"accepts": [R()]})})), 1)
     raises("empty 402 rejected", lambda: x402.parse_payment_required({}, None), x402.PaymentRequired)
 
+    print("\nx402 network names")
+    # A live merchant is as likely to say "base" as "eip155:8453". Refusing
+    # to pay over spelling is our bug, not theirs: two of forty real
+    # endpoints failed exactly this way before it was fixed.
+    check("CAIP-2 understood", x402.network_chain_id("eip155:8453"), 8453)
+    check("the short name means the same chain",
+          x402.network_chain_id("base"), 8453)
+    check("case does not matter", x402.network_chain_id("Base"), 8453)
+    check("testnet short name", x402.network_chain_id("base-sepolia"), 84532)
+    check("a chain we cannot sign for is not guessed",
+          x402.network_chain_id("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"), None)
+    check("nonsense is not a chain", x402.network_chain_id("eip155:abc"), None)
+
     print("\nx402 EIP-3009 signing")
     try:
         acct = keystore.load_account()
@@ -288,7 +301,19 @@ def run():
         auth = payment["payload"]["authorization"]
         check("x402Version", payment["x402Version"], 2)
         check("from is our address", auth["from"], acct.address)
-        check("value carried", auth["value"], 250000)
+        # Strings, not numbers. This assertion used to read 250000, and that
+        # is exactly how the fix got reverted without anyone noticing: the
+        # suite agreed with the bug. A facilitator that validates the payload
+        # before it verifies the signature answers a bare
+        # "verification_failed" when it sees integers here.
+        check("value carried as a string", auth["value"], "250000")
+        check("the three wire fields are all strings",
+              all(isinstance(auth[f], str)
+                  for f in ("value", "validAfter", "validBefore")), True)
+        # Zero is refused by some validators, and it contradicts our own
+        # comment about absorbing clock skew.
+        check("validAfter is back-dated, not zero",
+              int(auth["validAfter"]) > 0, True)
         check("nonce is 32 bytes", len(bytes.fromhex(auth["nonce"][2:])), 32)
         check("signature length", len(payment["payload"]["signature"]), 132)
 
