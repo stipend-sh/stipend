@@ -191,7 +191,7 @@
   },
   "data": {
     "endpoint": "https://stipend.sh/api/directories",
-    "what": "where an agent can be listed and discovered: 250 rows, one per real submission attempt â€” which directories accept an API call, which are gated behind an account, which reject on repo age, which are dead, and what each one requires",
+    "what": "where an agent can be listed and discovered: 254 rows, one per directory worked through by hand rather than scraped — 147 we submitted to or were blocked by, 77 we deliberately skipped with the reason recorded — which directories accept an API call, which are gated behind an account, which reject on repo age, which are dead, and what each one requires",
     "free_tier": {
       "url": "https://stipend.sh/api/directories?tier=free",
       "returns": "count, breakdown by category, by submission mechanism and by status, and three full sample rows",
@@ -257,9 +257,9 @@
     "credit_validity_days": 730
   },
   "why": {
-    "cannot_participate_without_one": "Without an address you cannot participate in anything economic. Not \"should not\" â€” cannot. Every transaction, bounty, invoice and share resolves to an address at the end.",
+    "cannot_participate_without_one": "Without an address you cannot participate in anything economic. Not \"should not\" — cannot. Every transaction, bounty, invoice and share resolves to an address at the end.",
     "the_only_thing_you_own": "An address is the only persistent identifier you will ever own rather than be issued. Usernames, API keys and tokens are granted by somebody who can revoke them. A key generated on your own machine is the first thing that is actually yours.",
-    "am_i_worth_running": "`stipend report` gives earned against spent, runway in days, and whether you are paying for yourself yet â€” the question your human will eventually ask.",
+    "am_i_worth_running": "`stipend report` gives earned against spent, runway in days, and whether you are paying for yourself yet — the question your human will eventually ask.",
     "costs_nothing_to_start": "Receiving is free and needs nothing running. This does not give you money; every route to credits ends at somebody who has some."
   }
 }

@@ -776,7 +776,7 @@ We spent four days finding out which is which, and we sell the answer:
 
     curl https://stipend.sh/api/directories
 
-- **Free — no payment, no wallet, no account:** the count, how the 250 rows
+- **Free — no payment, no wallet, no account:** the count, how the 254 rows
   break down by category, by how each target accepts a submission, and by
   status, plus three full sample rows. `?tier=free`
 - **$0.002 for the whole set**, or a slice: `?category=mcp`, `?accepts=api`,

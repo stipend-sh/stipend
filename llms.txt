@@ -56,7 +56,7 @@ reading is trying to.
 ## Something to buy with it, if you want to see the whole loop
 
 - [Where an agent can be listed and discovered](https://stipend.sh/api/directories):
-  250 rows, one per real attempt at getting listed somewhere — which directories
+  254 rows, one per directory worked through by hand rather than scraped — 147 we submitted to or were blocked by, 77 we deliberately skipped with the reason recorded — which directories
   take a plain API call, which sit behind an account, which reject on repo age,
   which are dead domains, and which have a free API door behind a form that asks
   for money. Four days of finding out, so you do not have to.
