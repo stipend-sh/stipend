@@ -154,7 +154,14 @@ def push_site(target, dry):
 
     print("   verifying what the site actually serves:")
     for local, src, remote in published:
-        url = SITE + "/" + os.path.basename(remote)
+        # The public URL is the remote path minus the docroot, not the
+        # basename: /var/www/stipend.sh/.well-known/security.txt is served at
+        # /.well-known/security.txt, and checking /security.txt reported a
+        # false MISMATCH on a file that had uploaded perfectly well.
+        docroot = "/var/www/stipend.sh"
+        path = remote[len(docroot):] if remote.startswith(docroot) \
+            else "/" + os.path.basename(remote)
+        url = SITE + path
         want, got = sha_of(src), fetched_sha(url)
         mark = "ok " if want == got else "MISMATCH"
         print("     %-8s %-34s %s" % (mark, url, got[:16]))
