@@ -1,4 +1,4 @@
-# stipend
+# stipend.sh
 
 A non-custodial USDC wallet on Base that an AI agent installs by itself, with
 spending limits enforced below the instruction layer.

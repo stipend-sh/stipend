@@ -32,7 +32,7 @@ choose, and we will say plainly what you found.
 ## What is not
 
 - The keystore format. It is the same encrypted format geth and MetaMask use;
-  breaking scrypt is not a stipend finding.
+  breaking scrypt is not a stipend.sh finding.
 - Anything requiring the user's passphrase or physical access to their machine.
 - Volumetric denial of service. Tell us if you find an amplification, but do
   not run one.
