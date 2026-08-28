@@ -1,0 +1,13 @@
+# stipend.sh — RFC 9116 security contact.
+# Served at /.well-known/security.txt
+#
+# We had none of this until August 2026, and a researcher found us anyway by
+# scanning for projects that publish their own policy rather than going through
+# a platform. He was looking for exactly this file and we did not have it.
+
+Contact: mailto:support@stipend.sh
+Expires: 2027-08-26T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://stipend.sh/.well-known/security.txt
+Policy: https://stipend.sh/security.md
+Acknowledgments: https://stipend.sh/security.md

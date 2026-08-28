@@ -20,6 +20,8 @@
         "SKILL.md": "/var/www/stipend.sh/skill.md",
         "llms.txt": "/var/www/stipend.sh/llms.txt",
         "agent.json": "/var/www/stipend.sh/agent.json",
+        "SECURITY.md": "/var/www/stipend.sh/security.md",
+        "security.txt": "/var/www/stipend.sh/.well-known/security.txt",
         "dist/stipend.tar.gz": "/var/www/stipend.sh/stipend.tar.gz"
       },
       "host": "root@43.229.62.98",
