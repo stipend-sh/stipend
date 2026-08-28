@@ -44,6 +44,11 @@ HEADER_SIGNATURE = "PAYMENT-SIGNATURE"
 # transaction. Nothing in the spec compels it, so treat it as a courtesy.
 HEADER_RESPONSE = "PAYMENT-RESPONSE"
 
+# Who a merchant sees paying them. We sent nothing at all until 29 August 2026,
+# which made our payers indistinguishable from any Python script and meant a
+# merchant offering to watch for us had nothing to match on.
+USER_AGENT = "stipend/%s (+https://stipend.sh)"
+
 # EIP-3009. Field order matters — it is part of the type hash.
 EIP3009_TYPES = {
     "TransferWithAuthorization": [
@@ -109,6 +114,16 @@ def token_domain(token_address, cfg=None):
         "chainId": p["chain_id"],
         "verifyingContract": token_address,
     }
+
+
+def user_agent():
+    """The string we identify ourselves with, version included.
+
+    A merchant reporting "payments from stipend started failing" is only
+    actionable if we know which build they mean.
+    """
+    from . import __version__
+    return USER_AGENT % __version__
 
 
 def _header_lookup(headers, name):
@@ -358,6 +373,8 @@ def _fetch(url, data=None, headers=None, cfg=None, method=None,
            _served=None):
     cfg = cfg or load_config()
     headers = dict(headers or {})
+    if not any(k.lower() == "user-agent" for k in headers):
+        headers["User-Agent"] = user_agent()
     request = urllib.request.Request(url, data=data, headers=headers, method=method)
 
     try:
@@ -438,7 +455,9 @@ def probe(url, cfg=None, timeout=30):
     """What would this cost? Makes no payment and signs nothing."""
     cfg = cfg or load_config()
     try:
-        with urllib.request.urlopen(urllib.request.Request(url), timeout=timeout) as r:
+        probe_request = urllib.request.Request(
+            url, headers={"User-Agent": user_agent()})
+        with urllib.request.urlopen(probe_request, timeout=timeout) as r:
             return {"paid": False, "status": r.status, "message": "no payment required"}
     except urllib.error.HTTPError as e:
         if e.code != 402:
