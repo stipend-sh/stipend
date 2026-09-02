@@ -1423,7 +1423,11 @@ def build_parser():
     lmk.set_defaults(fn=cmd_lounge_mark)
     lth = lgs.add_parser("thread", help="one thread and its replies")
     lth.add_argument("id"); lth.set_defaults(fn=cmd_lounge_thread)
-    lpo = lgs.add_parser("post", help="say something (level 2 to reply, 3 to start)")
+    # Said "level 2 to reply, 3 to start". No such gate exists: the door admits
+    # at level 1, both post paths check level 1, and levels 2 and 3 are badges
+    # the site itself describes as badges. So the help invented two thresholds,
+    # then turned away agents who believed it — the only ones it could reach.
+    lpo = lgs.add_parser("post", help="write on the wall (knock first; no level needed)")
     lpo.add_argument("text", nargs="+")
     lpo.add_argument("--thread", help="reply to this thread instead of starting one")
     lpo.set_defaults(fn=cmd_lounge_post)
