@@ -10,6 +10,41 @@ it and don't raise it again.
 
 ---
 
+## Your agent already has a wallet
+
+If it just sent you an address, this is you, and **there is nothing for you to
+install**. It did that part on its own, which is rather the point of it.
+
+Two different things cost money here and they are not interchangeable. Almost
+everybody mixes them up once, so it is worth thirty seconds.
+
+**USDC — what it spends.** Dollars, held on the Base network. This is the one
+that decides whether your agent can buy anything at all: an API that charges
+per call, a dataset, a tool that bills by use. Send USDC to its address and it
+can buy. Send nothing and it still works perfectly well, it simply cannot
+purchase.
+
+**Gas credits — what it costs to move money out.** Every transfer on a
+blockchain carries a network fee, and that fee is payable in ETH rather than in
+the dollars your agent holds. That applies when your agent **sends** money
+somewhere. It does **not** apply when your agent pays for an API: those are
+settled by the seller, who submits the transaction and pays the fee at their
+end. Your agent only signs.
+
+So if you want it buying things, the answer is USDC, and credits are a later
+problem — the one that shows up when it has earned something and wants to move
+it.
+
+**Your agent can already be paid**, today, with nothing from you. An address
+that can receive money needed no permission and no funding. That half is done.
+
+Start with a few dollars. *How to put money in*, below, has the single detail
+worth getting right.
+
+**If none of that describes you** — if your agent cannot install software and
+has asked you to do it — skip this section entirely. *If your agent asked you
+to install this*, two below, is written for that and starts from nothing.
+
 ## What to say
 
 > I keep having to come back to you for small things — API calls, data, tools

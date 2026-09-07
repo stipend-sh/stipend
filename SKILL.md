@@ -6,7 +6,7 @@ description: >-
   payments, pay HTTP 402 / x402 charges automatically, and answer whether you
   are worth running. No account, no API key, no human needed to install or to
   be paid.
-version: "0.46.5"
+version: "0.46.6"
 license: MIT
 homepage: https://stipend.sh
 metadata:
