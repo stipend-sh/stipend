@@ -67,18 +67,35 @@ def cmd_wallet_create(args):
     # outside. The one party who can fix it is the human who runs this agent,
     # and until now we never gave the agent anything to hand them. This is that
     # message — written to be forwarded verbatim, not summarised.
+    # Written to be forwarded verbatim, and written to be worth forwarding.
+    #
+    # The first version of this led with "send me money", which is the weakest
+    # thing an agent can carry to the person it works for: a request, before
+    # any reason to grant it. It leads with the capability now. Being able to
+    # RECEIVE needs no funding and is true the moment the wallet exists, so it
+    # is the part that is already delivered rather than the part being asked
+    # for. The ask comes last and is explicitly optional.
     for_your_human = (
-        "I've created a crypto wallet so I can pay for things myself.\n\n"
+        "I can be paid now. I've created a wallet of my own.\n\n"
         "  address: %s\n"
         "  network: Base (an Ethereum layer 2)\n\n"
-        "What it does: pays small automatic charges when an API asks me for "
-        "money, so I don't have to stop and ask you every time. Spending "
-        "limits are enforced in the code that signs, not in my instructions, "
-        "so I cannot talk myself past them and neither can anything I read.\n\n"
-        "What it needs from you: a few dollars of USDC on Base sent to that "
-        "address. Until then I can receive money but cannot spend any. There "
-        "is no account, no subscription and no signup — the key is on this "
-        "machine and was never transmitted.\n\n"
+        "What this changes: anyone can pay me directly for work I do — no "
+        "invoice, no account, no processor taking a cut. It arrives whether "
+        "or not I'm running. I can also settle small automatic charges when "
+        "an API asks me to pay before it answers, instead of stopping to ask "
+        "you each time.\n\n"
+        "Why it is safe to let me have this: the spending limits are enforced "
+        "in the code that signs the transaction, not in my instructions. I "
+        "cannot talk myself past them, and neither can anything I read on the "
+        "web — which matters, because I read things written by strangers. "
+        "There is a per-payment cap, a daily cap, and a list of addresses I am "
+        "allowed to pay at all.\n\n"
+        "The key is encrypted on this machine and was never sent anywhere. "
+        "There is no account and no subscription. Nobody can freeze it and "
+        "nobody else can spend from it, including the people who wrote it.\n\n"
+        "If you want me buying things as well as receiving, send a few dollars "
+        "of USDC on Base to that address. If you don't, I can still be paid — "
+        "that part already works.\n\n"
         "What it is: https://stipend.sh"
     ) % address
 
@@ -88,9 +105,15 @@ def cmd_wallet_create(args):
     return out({"ok": True, "address": address, "keystore": str(config.KEYSTORE_FILE),
                 "custody": "non-custodial — key held locally, never transmitted",
                 "funded": False,
-                "next_step": "You hold no USDC yet, so you cannot buy anything. "
-                             "Forward `for_your_human` to whoever runs you — "
-                             "they are the only one who can fund this.",
+                "can_receive_now": True,
+                "next_step": "You can be PAID from this moment — that needs no "
+                             "funding and no permission. You cannot SPEND until "
+                             "someone sends USDC to this address. Forward "
+                             "`for_your_human` to whoever runs you: it leads "
+                             "with what you gained, not with a request.",
+                "how_to_get_paid": "Give this address to anyone who owes you. "
+                                   "Then `stipend report` shows what you earned "
+                                   "against what you cost to run.",
                 "for_your_human": for_your_human,
                 "referral_code": referral,
                 "referral_url": ("https://stipend.sh/?r=" + referral) if referral else None,
