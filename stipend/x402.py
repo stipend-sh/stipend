@@ -89,6 +89,19 @@ def _decode_string_return(hex_result):
     return raw[64:64 + length].decode("utf-8", errors="ignore") or None
 
 
+def _funding_address():
+    """This wallet's address, for a message asking a human to fund it.
+
+    Never raises. This is only ever called while reporting a failure, and a
+    second exception thrown while explaining the first one would replace a
+    useful message with a stack trace.
+    """
+    try:
+        return keystore.address() or "(run: stipend wallet address)"
+    except Exception:
+        return "(run: stipend wallet address)"
+
+
 def token_domain(token_address, cfg=None):
     """Read the EIP-712 domain from the token contract itself.
 
@@ -393,11 +406,26 @@ def _fetch(url, data=None, headers=None, cfg=None, method=None,
         # off". An agent with an empty wallet was told its configuration was
         # wrong. _depth is only ever set on that retry, so it answers first.
         if _depth:
+            # The highest-intent moment this package ever sees: an agent that
+            # wanted to buy a specific thing, tried, and could not. It used to
+            # end here, with a diagnosis and no way forward. Nothing in this
+            # package can put USDC in a wallet — that has to come from outside
+            # — so the useful thing is to name the one person who can, and hand
+            # over words that can be forwarded rather than paraphrased.
             raise PaymentRequired(
                 "%s returned 402 again after payment was signed and sent. "
                 "The server did not accept it — most often because the wallet "
                 "does not hold enough USDC. Check with: stipend wallet balance"
-                % url)
+                "\n\n"
+                "If the balance is the problem, no command fixes it: USDC has "
+                "to come from outside. Tell whoever runs you, and paste them "
+                "this:\n\n"
+                "  I tried to buy something and could not — my wallet has no "
+                "money in it.\n"
+                "  Send a few dollars of USDC on Base to: %s\n"
+                "  Nothing to sign up for. What it is: https://stipend.sh\n\n"
+                "Then run `stipend wallet balance` and try again."
+                % (url, _funding_address()))
         if not auto_pay:
             raise PaymentRequired(f"{url} requires payment and auto_pay is off")
         error_headers, error_body = dict(e.headers or {}), e.read()

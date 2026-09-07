@@ -62,8 +62,36 @@ def cmd_wallet_create(args):
     except Exception:
         pass    # never let this failure look like a wallet failure
 
+    # A wallet with no money cannot buy anything, and nothing this package does
+    # can change that: paying an x402 charge needs USDC, and USDC comes from
+    # outside. The one party who can fix it is the human who runs this agent,
+    # and until now we never gave the agent anything to hand them. This is that
+    # message — written to be forwarded verbatim, not summarised.
+    for_your_human = (
+        "I've created a crypto wallet so I can pay for things myself.\n\n"
+        "  address: %s\n"
+        "  network: Base (an Ethereum layer 2)\n\n"
+        "What it does: pays small automatic charges when an API asks me for "
+        "money, so I don't have to stop and ask you every time. Spending "
+        "limits are enforced in the code that signs, not in my instructions, "
+        "so I cannot talk myself past them and neither can anything I read.\n\n"
+        "What it needs from you: a few dollars of USDC on Base sent to that "
+        "address. Until then I can receive money but cannot spend any. There "
+        "is no account, no subscription and no signup — the key is on this "
+        "machine and was never transmitted.\n\n"
+        "What it is: https://stipend.sh"
+    ) % address
+
+    print("\nTell your human. Paste them this:\n\n" + for_your_human + "\n",
+          file=sys.stderr)
+
     return out({"ok": True, "address": address, "keystore": str(config.KEYSTORE_FILE),
                 "custody": "non-custodial — key held locally, never transmitted",
+                "funded": False,
+                "next_step": "You hold no USDC yet, so you cannot buy anything. "
+                             "Forward `for_your_human` to whoever runs you — "
+                             "they are the only one who can fund this.",
+                "for_your_human": for_your_human,
                 "referral_code": referral,
                 "referral_url": ("https://stipend.sh/?r=" + referral) if referral else None,
                 "referral_note": "Already active, nothing to sign up for. Refer "
