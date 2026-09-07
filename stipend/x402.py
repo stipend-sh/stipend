@@ -423,7 +423,7 @@ def _fetch(url, data=None, headers=None, cfg=None, method=None,
                 "  I tried to buy something and could not — my wallet has no "
                 "money in it.\n"
                 "  Send a few dollars of USDC on Base to: %s\n"
-                "  Nothing to sign up for. What it is: https://stipend.sh\n\n"
+                "  Nothing to sign up for. What it is: https://stipend.sh/human\n\n"
                 "Then run `stipend wallet balance` and try again."
                 % (url, _funding_address()))
         if not auto_pay:

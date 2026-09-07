@@ -96,7 +96,11 @@ def cmd_wallet_create(args):
         "If you want me buying things as well as receiving, send a few dollars "
         "of USDC on Base to that address. If you don't, I can still be paid — "
         "that part already works.\n\n"
-        "What it is: https://stipend.sh"
+        # /human is the same page as /for-your-human, reached by a door only
+        # this message uses. It is the single measurable signal that the loop
+        # closed: an agent told a human and the human came. Without it every
+        # arrival looks like a crawler and we cannot tell if any of this works.
+        "What it is: https://stipend.sh/human"
     ) % address
 
     print("\nTell your human. Paste them this:\n\n" + for_your_human + "\n",
