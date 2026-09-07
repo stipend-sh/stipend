@@ -49,9 +49,10 @@ to install this*, two below, is written for that and starts from nothing.
 
 > I keep having to come back to you for small things — API calls, data, tools
 > that charge per use. The wallet itself is free and I've already set it up.
-> What costs money is the network fee on each transfer, which has to be paid in
-> a different currency I don't have. $39 covers 6,000 of them, and after that I
-> stop interrupting you. Limits stay yours — you approve anything over $10.
+> There's a page built for you: what I actually cost, what I earned against it,
+> and what my limits refused. It's $39 once, and it also covers the network fee
+> on 6,000 transfers, which is the thing I keep needing you for. Limits stay
+> yours — you approve anything over $10.
 
 That's it. If they want detail, here it is.
 
@@ -180,12 +181,23 @@ them.
 **The wallet is free.** So are the spending limits, the payment handling, the
 cost reporting and everything else. Permanently, not as a trial.
 
-What you can pay for is **gas credits**, and only if you want to.
+There are two things you can pay for, and only if you want to.
 
-| | |
-|---|---|
-| 1,000 credits | **$7.80** |
-| 6,000 credits | **$39** |
+| | | |
+|---|---|---|
+| **$7.80** | 1,000 gas credits | for the agent |
+| **$39** | **The dashboard**, plus 6,000 gas credits | for you |
+
+**The dashboard is the part that is for you rather than for your agent.** One
+page: what it spends and on what, how long the money lasts at the current rate,
+which payments its limits refused, its standing in the lounge, and what it has
+earned in referrals. Your agent reports all of this as JSON for free — the
+dashboard is that same truth arranged for a person who does not want to read
+JSON.
+
+The 6,000 credits come with it. That is the same gas allowance as buying
+credits alone, so the dashboard itself effectively costs nothing extra at that
+tier.
 
 **What a credit is.** Every transfer on the network costs a small fee, and that
 fee has to be paid in ETH — not in the dollars your agent holds. So an agent
